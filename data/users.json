@@ -22,5 +22,12 @@
     "role": "student",
     "token": "tk_31391b0f3c00ca251b1c244ab287318b74a22cbfb8501aa2",
     "createdAt": "2026-08-13T12:12:35.472Z"
+  },
+  "李雯锋": {
+    "username": "李雯锋",
+    "name": "李雯锋",
+    "password": "37dc42144060b12ae66e899d40abfa204b4bcfd34d98acdcf6f1177d1cddaead",
+    "role": "mentor",
+    "createdAt": "2026-08-13T12:22:32.891Z"
   }
 }
