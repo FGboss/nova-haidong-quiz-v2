@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>诺瓦&嗨动 产品培训考核系统 V2</title>
+<title>诺瓦&嗨动 产品培训考核系统 V3</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -18,6 +18,8 @@
 --newbie-color:#059669;--newbie-light:#d1fae5;
 --tech-color:#7c3aed;--tech-light:#ede9fe;
 --sales-color:#ea580c;--sales-light:#fff7ed;
+--client-color:#0891b2;--client-light:#cffafe;
+--new-product-color:#db2777;--new-product-light:#fce7f3;
 }
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh;-webkit-font-smoothing:antialiased}
 #app{min-height:100vh}
@@ -30,7 +32,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .btn-outline{background:transparent;border:1.5px solid var(--border);color:var(--text)}.btn-outline:hover{border-color:var(--primary);color:var(--primary)}
 .btn-sm{padding:6px 14px;font-size:13px}.btn-lg{padding:14px 32px;font-size:16px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.btn-newbie{background:var(--newbie-color);color:#fff}.btn-tech{background:var(--tech-color);color:#fff}.btn-sales{background:var(--sales-color);color:#fff}
 
 /* Cards */
 .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:16px;border:1px solid var(--border)}
@@ -44,6 +45,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .badge-newbie{background:var(--newbie-light);color:var(--newbie-color)}
 .badge-tech{background:var(--tech-light);color:var(--tech-color)}
 .badge-sales{background:var(--sales-light);color:var(--sales-color)}
+.badge-client{background:var(--client-light);color:var(--client-color)}
+.badge-new-product{background:var(--new-product-light);color:var(--new-product-color)}
 
 /* Forms */
 .form-group{margin-bottom:16px}
@@ -56,6 +59,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .toast-success{background:var(--success);color:#fff}
 .toast-error{background:var(--danger);color:#fff}
 .toast-info{background:var(--primary);color:#fff}
+.toast-warning{background:var(--warning);color:#fff}
 @keyframes slideIn{from{opacity:0;transform:translate(-50%,-20px)}to{opacity:1;transform:translate(-50%,0)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .fade-in{animation:fadeIn .3s ease}
@@ -80,6 +84,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .panel-card.newbie{border-color:var(--newbie-color)}.panel-card.newbie:hover{background:var(--newbie-light)}
 .panel-card.tech{border-color:var(--tech-color)}.panel-card.tech:hover{background:var(--tech-light)}
 .panel-card.sales{border-color:var(--sales-color)}.panel-card.sales:hover{background:var(--sales-light)}
+.panel-card.client{border-color:var(--client-color)}.panel-card.client:hover{background:var(--client-light)}
+.panel-card.new-product{border-color:var(--new-product-color)}.panel-card.new-product:hover{background:var(--new-product-light)}
 .panel-icon{font-size:48px;margin-bottom:12px;line-height:1}
 .panel-title{font-size:20px;font-weight:700;margin-bottom:6px}
 .panel-desc{font-size:13px;color:var(--text-sec);margin-bottom:12px;line-height:1.5}
@@ -176,16 +182,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-sec)}
 .empty-state-text{font-size:14px}
 
-/* Panel Tabs */
-.panel-tabs{display:flex;gap:0;margin-bottom:20px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border)}
-.panel-tab{flex:1;padding:10px;text-align:center;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;background:var(--card);color:var(--text-sec);border:none}
-.panel-tab.active{color:#fff}
-.panel-tab.active.newbie{background:var(--newbie-color)}
-.panel-tab.active.tech{background:var(--tech-color)}
-.panel-tab.active.sales{background:var(--sales-color)}
+/* Auth Tabs */
+.auth-tab{transition:all .2s}
+.auth-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
 
-/* Mentor */
-.mentor-only{background:var(--warning-light);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:8px 12px;font-size:13px;color:var(--warning);margin-bottom:12px}
+/* Student Chip */
+.student-chip:hover{transform:scale(1.05)}
+
+/* Search */
+.form-input.search-input{width:220px;padding:6px 10px;font-size:13px}
 
 @media(max-width:640px){
 .container{padding:12px}
@@ -195,22 +200,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .stat-grid{grid-template-columns:repeat(2,1fr)}
 .table{font-size:12px}.table th,.table td{padding:6px 8px}
 .question-card{padding:14px}
+.header-inner{flex-wrap:wrap;gap:8px}
 }
-
-/* Question Bank */
-.qbank-item{transition:all .2s}
-.qbank-item:hover{box-shadow:var(--shadow)}
-.qbank-search{width:200px;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px}
-
-/* Weak Areas */
-.weak-areas-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
-.weak-error-high{color:var(--danger);font-weight:700}
-.weak-error-mid{color:var(--warning);font-weight:700}
-.weak-error-low{color:var(--success);font-weight:700}
 </style>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
