@@ -184,7 +184,7 @@ function initSuperAdmin() {
       createdAt: new Date().toISOString()
     };
     writeObj('users.json', users);
-    console.log('[init] Super admin created: PC / password123');
+    console.log('[init] Super admin initialized.');
   }
 }
 initSuperAdmin();

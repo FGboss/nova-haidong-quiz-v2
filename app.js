@@ -106,9 +106,7 @@ function renderLogin(app){
           <div class="auth-tab" id="tabRegister" onclick="APP.switchAuthTab('register')" style="flex:1;padding:12px;text-align:center;font-size:14px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s">学员注册</div>
         </div>
         <div id="authForm" style="padding:20px 24px 24px"></div>
-        <div style="text-align:center;padding:0 24px 20px;font-size:12px;color:#94a3b8">
-          管理员账号: PC / password123
-        </div>
+        
       </div>
     </div>`;
   renderLoginForm();
