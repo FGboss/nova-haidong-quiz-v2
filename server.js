@@ -192,6 +192,26 @@ function initSuperAdmin() {
 }
 initSuperAdmin();
 
+// ===== 初始化模块配置 =====
+function initModuleConfig() {
+  const config = readObj('module_config.json');
+  const defaults = {
+    newbie: { id: 'newbie', name: '新人专项', icon: '📚', desc: '3周系统培训考核，每日一考+周考，15套试卷覆盖产品基础知识', bankIds: [] },
+    tech: { id: 'tech', name: '技术进阶', icon: '🔧', desc: '按产品系列深度考核，涵盖参数、性能、技术排查和系统架构', bankIds: [] },
+    sales: { id: 'sales', name: '销售进阶', icon: '💼', desc: '按产品系列考核，侧重方案搭配、选型推荐和场景应用能力', bankIds: [] },
+    client: { id: 'client', name: '客户端考核', icon: '🏢', desc: '客户现场培训考核，按产品系列出题，模拟纸质试卷模式', bankIds: [] },
+    new_product: { id: 'new_product', name: '新品考核', icon: '🆕', desc: '新品培训考核，持续更新中', bankIds: [] }
+  };
+  if (!config.fixedModules) config.fixedModules = {};
+  for (const k of Object.keys(defaults)) {
+    if (!config.fixedModules[k]) config.fixedModules[k] = defaults[k];
+  }
+  if (!config.customModules) config.customModules = {};
+  writeObj('module_config.json', config);
+}
+initModuleConfig();
+function getModuleConfig() { return readObj('module_config.json'); }
+
 // ===== 用户认证 =====
 function hashPassword(pwd) {
   return crypto.createHash('sha256').update(pwd).digest('hex');
@@ -306,37 +326,54 @@ const EXAM_CONFIGS = {
     { id: 'client_hd_audio', title: '嗨动 音频扩声系统', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_audio.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
     { id: 'client_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_multimedia.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
     { id: 'client_comprehensive', title: '全系列产品综合考核', panel: 'client', brand: '综合', duration: 60, questionFile: 'client/comprehensive.js', totalQuestions: 25, replaceCount: 8, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
-  ],
-  new_product: [
-    // 新品日常考核 — 动态加载，由 new_product_meta.json 驱动
   ]
 };
 
-// 动态加载新品考核配置
-function loadNewProductExams() {
-  const meta = readObj('new_product_meta.json');
-  return Object.values(meta).map(m => ({
-    id: m.id, title: m.title, panel: 'new_product', brand: m.brand || '新品',
-    duration: 40, questionFile: m.questionFile, totalQuestions: 20, replaceCount: 6,
-    distribution: m.distribution || { single: 10, multiple: 5, judge: 4, short: 1 }
-  }));
-}
-
+// ===== Fisher-Yates 洗牌 =====
 function getAllExams() {
   const all = [];
   for (const panel of ['newbie', 'tech', 'sales', 'client']) {
     for (const exam of (EXAM_CONFIGS[panel] || [])) all.push({ ...exam });
   }
-  // 动态新品
-  const newProducts = loadNewProductExams();
-  for (const exam of newProducts) all.push(exam);
+  const config = getModuleConfig();
+  const meta = readObj('new_product_meta.json');
+  // Fixed modules with bank assignments
+  for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
+    if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client') continue;
+    for (const bankId of (mod.bankIds || [])) {
+      const m = meta[bankId];
+      if (m) all.push({
+        id: m.id, title: m.title, panel: moduleId, brand: m.brand || '新品',
+        duration: 40, questionFile: m.questionFile, totalQuestions: 18, replaceCount: 5,
+        distribution: m.distribution || { single: 8, multiple: 5, judge: 4, short: 1 }
+      });
+    }
+  }
+  // Custom modules
+  for (const [moduleId, mod] of Object.entries(config.customModules || {})) {
+    for (const bankId of (mod.bankIds || [])) {
+      const m = meta[bankId];
+      if (m) all.push({
+        id: m.id, title: m.title, panel: moduleId, brand: m.brand || '新品',
+        duration: 40, questionFile: m.questionFile, totalQuestions: 18, replaceCount: 5,
+        distribution: m.distribution || { single: 8, multiple: 5, judge: 4, short: 1 }
+      });
+    }
+  }
   return all;
 }
 
 function getAllPanels() {
   const panels = ['newbie', 'tech', 'sales', 'client'];
-  const newProducts = loadNewProductExams();
-  if (newProducts.length > 0) panels.push('new_product');
+  const config = getModuleConfig();
+  const meta = readObj('new_product_meta.json');
+  for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
+    if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client') continue;
+    if ((mod.bankIds || []).length > 0) panels.push(moduleId);
+  }
+  for (const [moduleId, mod] of Object.entries(config.customModules || {})) {
+    if ((mod.bankIds || []).length > 0) panels.push(moduleId);
+  }
   return panels;
 }
 
@@ -416,7 +453,7 @@ function gradeShortAnswer(answer, keywords, maxPoints) {
 }
 
 // ===== 面板中文名 =====
-const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销售进阶', client: '客户端考核', new_product: '新品日常考核' };
+const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销售进阶', client: '客户端考核', new_product: '新品考核' };
 
 // ====== API 路由 ======
 
@@ -593,11 +630,26 @@ app.get('/api/admin/assignments', adminAuth, (req, res) => {
 
 app.get('/api/exams', (req, res) => {
   const panel = req.query.panel;
-  if (panel && panel !== 'new_product') {
-    if (EXAM_CONFIGS[panel]) return res.json({ success: true, exams: EXAM_CONFIGS[panel] });
+  if (panel && EXAM_CONFIGS[panel]) {
+    return res.json({ success: true, exams: EXAM_CONFIGS[panel] });
   }
-  if (panel === 'new_product') {
-    return res.json({ success: true, exams: loadNewProductExams() });
+  if (panel) {
+    const config = getModuleConfig();
+    const mod = (config.fixedModules || {})[panel] || (config.customModules || {})[panel];
+    if (mod) {
+      const meta = readObj('new_product_meta.json');
+      const exams = (mod.bankIds || []).map(bankId => {
+        const m = meta[bankId];
+        if (!m) return null;
+        return {
+          id: m.id, title: m.title, panel, brand: m.brand || '新品',
+          duration: 40, questionFile: m.questionFile, totalQuestions: 18, replaceCount: 5,
+          distribution: m.distribution || { single: 8, multiple: 5, judge: 4, short: 1 }
+        };
+      }).filter(Boolean);
+      return res.json({ success: true, exams });
+    }
+    return res.json({ success: true, exams: [] });
   }
   res.json({ success: true, exams: getAllExams(), panels: getAllPanels() });
 });
@@ -883,9 +935,10 @@ app.get('/api/mentor/questions', mentorAuth, (req, res) => {
   const panel = req.query.panel || 'all';
   const allQuestions = {};
   const searchPanels = panel === 'all' ? getAllPanels() : [panel];
+  const allExams = getAllExams();
   for (const p of searchPanels) {
     allQuestions[p] = [];
-    const exams = p === 'new_product' ? loadNewProductExams() : (EXAM_CONFIGS[p] || []);
+    const exams = allExams.filter(e => e.panel === p);
     for (const exam of exams) {
       allQuestions[p].push({
         examId: exam.id, title: exam.title, panel: p,
@@ -893,7 +946,7 @@ app.get('/api/mentor/questions', mentorAuth, (req, res) => {
       });
     }
   }
-  res.json({ success: true, questions: allQuestions, exams: getAllExams() });
+  res.json({ success: true, questions: allQuestions, exams: allExams });
 });
 
 app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, (req, res) => {
@@ -975,7 +1028,8 @@ app.post('/api/admin/new-products', mentorAuth, (req, res) => {
   const meta = readObj('new_product_meta.json');
   meta[productId] = {
     id: productId, title, brand: brand || '新品',
-    questionFile: fileName, distribution: { single: 10, multiple: 5, judge: 4, short: 1 },
+    questionFile: fileName, questionCount: questions.length,
+    distribution: { single: 8, multiple: 5, judge: 4, short: 1 },
     createdAt: new Date().toISOString()
   };
   writeObj('new_product_meta.json', meta);
@@ -983,7 +1037,7 @@ app.post('/api/admin/new-products', mentorAuth, (req, res) => {
   res.json({ success: true, product: meta[productId], questionCount: questions.length });
 });
 
-// 删除新品考核
+// 删除产品题库
 app.delete('/api/admin/new-products/:productId', mentorAuth, (req, res) => {
   const meta = readObj('new_product_meta.json');
   if (!meta[req.params.productId]) return res.status(404).json({ error: '新品不存在' });
@@ -1019,9 +1073,9 @@ app.get('/api/admin/question-template', mentorAuth, (req, res) => {
 
   // ---- Sheet 1: 使用说明 ----
   const instructions = [
-    ['诺瓦&嗨动 新品题库导入模板 - 使用说明'],
+    ['诺瓦&嗨动 产品题库导入模板 - 使用说明'],
     [''],
-    ['📌 本模板用于批量导入新品考核题目，请按照以下规则填写"题库模板"工作表：'],
+    ['📌 本模板用于批量导入产品考核题目，请按照以下规则填写"题库模板"工作表：'],
     [''],
     ['一、列说明：'],
     ['  题型', '必填。可选值：单选题 / 多选题 / 判断题 / 简答题'],
@@ -1035,19 +1089,20 @@ app.get('/api/admin/question-template', mentorAuth, (req, res) => {
     ['  答案解析', '选填。对答案的补充说明，学员提交后可查看'],
     ['  关键词', '简答题必填。多个关键词用逗号分隔，用于自动评分匹配'],
     [''],
-    ['二、题目类型说明：'],
-    ['  单选题', '只有一个正确答案，学员从A/B/C/D中选一个'],
-    ['  多选题', '有多个正确答案，学员从A/B/C/D中选多个，如"ABC"'],
-    ['  判断题', '只有"对"或"错"两个选项，正确答案填"对"或"错"'],
-    ['  简答题', '学员自由输入文字答案，系统根据关键词自动评分'],
+    ['二、题目类型与数量建议（18题/套）：'],
+    ['  单选题（8题）', '只有一个正确答案，学员从A/B/C/D中选一个'],
+    ['  多选题（5题）', '有多个正确答案，学员从A/B/C/D中选多个，如"ABC"'],
+    ['  判断题（4题）', '只有"对"或"错"两个选项，正确答案填"对"或"错"'],
+    ['  简答题（1题）', '学员自由输入文字答案，系统根据关键词自动评分'],
     [''],
     ['三、注意事项：'],
     ['  1. 请勿修改表头行（第1行）'],
     ['  2. 每行一道题目，示例数据可以直接删除'],
     ['  3. 系统会自动为每道题生成唯一ID，无需手动填写'],
-    ['  4. 总分值系统会自动归一化到100分，但建议每题分值合理设置'],
+    ['  4. 总分值系统会自动归一化到100分，建议18题总分值约90-100分'],
     ['  5. 导入时需填写产品名称和选择品牌'],
-    ['  6. 也可将此模板发给其他AI工具，要求按此格式批量生成题目'],
+    ['  6. 导入后可分配到任意考核模块（新人专项/技术进阶/销售进阶/客户端考核/新品考核）'],
+    ['  7. 也可将此模板发给其他AI工具，要求按此格式批量生成题目'],
     [''],
     ['四、模板中的示例数据仅供参考，导入前请删除或替换为实际题目。'],
   ];
@@ -1091,7 +1146,7 @@ app.get('/api/admin/question-template', mentorAuth, (req, res) => {
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.set('Content-Disposition', 'attachment; filename="' + encodeURIComponent('新品题库导入模板') + '.xlsx"');
+  res.set('Content-Disposition', 'attachment; filename="' + encodeURIComponent('产品题库导入模板') + '.xlsx"');
   res.send(buf);
 });
 
@@ -1204,12 +1259,58 @@ app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), (r
   const meta = readObj('new_product_meta.json');
   meta[productId] = {
     id: productId, title, brand: brand || '新品',
-    questionFile: fileName, distribution: { single: 10, multiple: 5, judge: 4, short: 1 },
+    questionFile: fileName, questionCount: questions.length,
+    distribution: { single: 8, multiple: 5, judge: 4, short: 1 },
     createdAt: new Date().toISOString()
   };
   writeObj('new_product_meta.json', meta);
 
   res.json({ success: true, product: meta[productId], questionCount: questions.length });
+});
+
+// ===== 模块管理 API =====
+
+// 获取所有模块和产品题库
+app.get('/api/admin/modules', authMiddleware, (req, res) => {
+  const config = getModuleConfig();
+  const meta = readObj('new_product_meta.json');
+  res.json({ success: true, fixedModules: config.fixedModules, customModules: config.customModules, products: Object.values(meta) });
+});
+
+// 创建自定义模块
+app.post('/api/admin/modules', mentorAuth, (req, res) => {
+  const { name, icon, desc } = req.body;
+  if (!name) return res.status(400).json({ error: '请提供模块名称' });
+  const config = getModuleConfig();
+  const id = 'custom_' + Date.now();
+  config.customModules[id] = { id, name, icon: icon || '📋', desc: desc || '', bankIds: [] };
+  writeObj('module_config.json', config);
+  res.json({ success: true, module: config.customModules[id] });
+});
+
+// 删除自定义模块
+app.delete('/api/admin/modules/:moduleId', mentorAuth, (req, res) => {
+  const config = getModuleConfig();
+  if (config.customModules[req.params.moduleId]) {
+    delete config.customModules[req.params.moduleId];
+    writeObj('module_config.json', config);
+    return res.json({ success: true });
+  }
+  res.status(404).json({ error: '模块不存在或不可删除固定模块' });
+});
+
+// 更新模块（分配产品题库、修改名称等）
+app.put('/api/admin/modules/:moduleId', mentorAuth, (req, res) => {
+  const { bankIds, name, icon, desc } = req.body;
+  const config = getModuleConfig();
+  const mod = (config.fixedModules || {})[req.params.moduleId] || (config.customModules || {})[req.params.moduleId];
+  if (!mod) return res.status(404).json({ error: '模块不存在' });
+  if (bankIds !== undefined) mod.bankIds = bankIds;
+  if (name !== undefined) mod.name = name;
+  if (icon !== undefined) mod.icon = icon;
+  if (desc !== undefined) mod.desc = desc;
+  writeObj('module_config.json', config);
+  res.json({ success: true, module: mod });
 });
 
 // ===== 查缺补漏看板 =====

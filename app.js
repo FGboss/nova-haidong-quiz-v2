@@ -5,7 +5,7 @@
 const API_BASE = window.location.origin;
 const PASSING_SCORE = 95;
 const MAX_ATTEMPTS = 10;
-const PANEL_LABELS = { newbie:'新人专项', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品日常考核' };
+const PANEL_LABELS = { newbie:'新人专项', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核' };
 const PANEL_COLORS = { newbie:'newbie', tech:'tech', sales:'sales', client:'client', new_product:'new-product' };
 const PANEL_ICONS = { newbie:'📚', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕' };
 const PANEL_DESCS = {
@@ -23,6 +23,7 @@ let state = {
   authToken:null,
   currentUser:null,
   panel:null,
+  panelInfo:null,
   exams:[],
   currentExam:null,
   questions:[],
@@ -44,8 +45,9 @@ let state = {
   adminTab:'users',
   adminUsers:[],
   adminAssignments:[],
-  // New products
-  newProducts:[],
+  // Modules & products
+  modules:{ fixedModules:{}, customModules:{} },
+  allProducts:[],
   // Search
   searchQuery:'',
   searchStudent:'',
@@ -235,10 +237,30 @@ function logout(){
 }
 
 // ===== 首页 =====
-function renderHome(app){
+async function renderHome(app){
   const user = state.currentUser;
   const isAdmin = user.role === 'admin';
   const isMentor = user.role === 'mentor' || isAdmin;
+
+  // Load modules from API
+  try {
+    const modRes = await api('/api/admin/modules');
+    if (modRes.success) {
+      state.modules = { fixedModules: modRes.fixedModules || {}, customModules: modRes.customModules || {} };
+      state.allProducts = modRes.products || [];
+    }
+  } catch(e) { console.error('load modules:', e); }
+
+  // Build panel list
+  const fixedPanels = ['newbie', 'tech', 'sales', 'client'];
+  const dynamicPanels = [];
+  for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
+    if (fixedPanels.includes(id)) continue;
+    if ((mod.bankIds || []).length > 0) dynamicPanels.push({ id, ...mod });
+  }
+  for (const [id, mod] of Object.entries(state.modules.customModules || {})) {
+    if ((mod.bankIds || []).length > 0) dynamicPanels.push({ id, ...mod });
+  }
 
   app.innerHTML = `
     <div class="header">
@@ -262,21 +284,8 @@ function renderHome(app){
         <p>请根据你的培训阶段选择对应的考核板块</p>
       </div>
       <div class="panel-grid">
-        ${renderPanelCard('newbie')}
-        ${renderPanelCard('tech')}
-        ${renderPanelCard('sales')}
-        ${renderPanelCard('client')}
-        ${state.newProducts.length > 0 ? state.newProducts.map(np => `
-          <div class="panel-card new-product" onclick="APP.enterNewProduct('${np.id}')">
-            <div class="panel-icon">🆕</div>
-            <div class="panel-title">${escapeHtml(np.title)}</div>
-            <div class="panel-desc">新品培训考核 · ${escapeHtml(np.brand || '新品')}</div>
-            <div class="panel-meta">
-              <span class="badge badge-new-product">新品考核</span>
-              <span class="badge badge-new-product">20题/套</span>
-              <span class="badge badge-new-product">95分及格</span>
-            </div>
-          </div>`).join('') : ''}
+        ${fixedPanels.map(p => renderPanelCard(p)).join('')}
+        ${dynamicPanels.map(m => renderDynamicPanelCard(m)).join('')}
       </div>
     </div>`;
 }
@@ -284,20 +293,36 @@ function renderHome(app){
 function renderPanelCard(panel){
   return `
     <div class="panel-card ${panel}" onclick="APP.enterPanel('${panel}')">
-      <div class="panel-icon">${PANEL_ICONS[panel]}</div>
-      <div class="panel-title">${PANEL_LABELS[panel]}</div>
-      <div class="panel-desc">${PANEL_DESCS[panel]}</div>
+      <div class="panel-icon">${PANEL_ICONS[panel]||'📋'}</div>
+      <div class="panel-title">${PANEL_LABELS[panel]||panel}</div>
+      <div class="panel-desc">${PANEL_DESCS[panel]||''}</div>
       <div class="panel-meta">
-        <span class="badge badge-${panel}">${panel==='newbie'?'15套考试':panel==='new_product'?'动态更新':'8套考试'}</span>
+        <span class="badge badge-${panel}">${panel==='newbie'?'15套考试':'8套考试'}</span>
         <span class="badge badge-${panel}">20题/套</span>
         <span class="badge badge-${panel}">95分及格</span>
       </div>
     </div>`;
 }
 
+function renderDynamicPanelCard(mod){
+  const examCount = (mod.bankIds || []).length;
+  return `
+    <div class="panel-card new-product" onclick="APP.enterPanel('${mod.id}','${escapeHtml(mod.name)}','${escapeHtml(mod.icon||'📋')}')">
+      <div class="panel-icon">${mod.icon||'📋'}</div>
+      <div class="panel-title">${escapeHtml(mod.name)}</div>
+      <div class="panel-desc">${escapeHtml(mod.desc||'')}</div>
+      <div class="panel-meta">
+        <span class="badge badge-new-product">${examCount}套考试</span>
+        <span class="badge badge-new-product">18题/套</span>
+        <span class="badge badge-new-product">95分及格</span>
+      </div>
+    </div>`;
+}
+
 // ===== 进入板块 =====
-async function enterPanel(panel){
+async function enterPanel(panel, panelName, panelIcon){
   state.panel = panel;
+  state.panelInfo = panelName ? { name: panelName, icon: panelIcon } : null;
   state.page = 'panel';
   const res = await api(`/api/exams?panel=${panel}`);
   if (res.success){
@@ -343,7 +368,7 @@ function renderPanel(app){
       <div class="header-inner">
         <div>
           <div class="nav-back" onclick="APP.goHome()">← 返回首页</div>
-          <h1 style="margin-top:4px">${PANEL_LABELS[panel] || '考核'}</h1>
+          <h1 style="margin-top:4px">${state.panelInfo ? (state.panelInfo.icon + ' ' + state.panelInfo.name) : (PANEL_LABELS[panel] || '考核')}</h1>
         </div>
         <div>
           <span style="font-size:13px;opacity:.9">${escapeHtml(user.name)}</span>
@@ -672,9 +697,28 @@ function goHome(){
   clearInterval(state.quizTimer);
   state.page = 'home';
   state.panel = null;
+  state.panelInfo = null;
   state.currentExam = null;
-  loadNewProducts();
   render();
+}
+
+// ===== 模块辅助函数 =====
+function getAllModuleIds(){
+  const ids = ['newbie', 'tech', 'sales', 'client'];
+  for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
+    if (ids.includes(id)) continue;
+    if ((mod.bankIds || []).length > 0) ids.push(id);
+  }
+  for (const [id, mod] of Object.entries(state.modules.customModules || {})) {
+    if ((mod.bankIds || []).length > 0) ids.push(id);
+  }
+  return ids;
+}
+
+function getModuleName(panelId){
+  if (PANEL_LABELS[panelId]) return PANEL_LABELS[panelId];
+  const mod = (state.modules.fixedModules || {})[panelId] || (state.modules.customModules || {})[panelId];
+  return mod ? mod.name : panelId;
 }
 
 // ===== 我的记录 =====
@@ -808,8 +852,8 @@ function renderMentor(app){
   const tabs = ['overview','records','scoring','question_bank','weak_areas'];
   const tabLabels = { overview:'数据看板', records:'答题记录', scoring:'评分管理', question_bank:'题库管理', weak_areas:'查缺补漏' };
   // 导师/管理员额外标签
-  const extraTabs = ['new_products'];
-  const extraLabels = { new_products:'新品管理' };
+  const extraTabs = ['product_banks'];
+  const extraLabels = { product_banks:'产品题库导入管理' };
 
   app.innerHTML = `
     <div class="header">
@@ -833,7 +877,7 @@ function renderMentor(app){
     case 'scoring': renderMentorScoring(); break;
     case 'question_bank': renderMentorQuestionBank(); break;
     case 'weak_areas': renderMentorWeakAreas(); break;
-    case 'new_products': renderNewProducts(); break;
+    case 'product_banks': renderProductBankManager(); break;
   }
 }
 
@@ -869,12 +913,12 @@ function renderMentorOverview(){
     </div>
     <div class="card"><div class="card-title">各板块统计</div>
       <div class="stat-grid">
-        ${['newbie','tech','sales','client','new_product'].map(p => {
+        ${getAllModuleIds().map(p => {
           const s = panelStats[p] || { total:0, passed:0, score:0 };
           const avg = s.total > 0 ? Math.round(s.score / s.total) : 0;
           const rate = s.total > 0 ? Math.round(s.passed / s.total * 100) : 0;
           return `<div class="stat-card">
-            <div class="stat-value" style="font-size:20px">${PANEL_LABELS[p]||p}</div>
+            <div class="stat-value" style="font-size:20px">${getModuleName(p)}</div>
             <div class="stat-label">${s.total}条记录 · ${avg}分均分 · ${rate}%通过</div>
           </div>`;
         }).join('')}
@@ -900,7 +944,7 @@ function renderMentorRecords(){
   let html = `
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
       <button class="btn btn-sm ${state.mentorPanel==='all'?'btn-primary':'btn-outline'}" onclick="APP.filterMentorPanel('all')">全部</button>
-      ${['newbie','tech','sales','client','new_product'].map(p => `<button class="btn btn-sm ${state.mentorPanel===p?'btn-primary':'btn-outline'}" onclick="APP.filterMentorPanel('${p}')">${PANEL_LABELS[p]||p}</button>`).join('')}
+      ${getAllModuleIds().map(p => `<button class="btn btn-sm ${state.mentorPanel===p?'btn-primary':'btn-outline'}" onclick="APP.filterMentorPanel('${p}')">${getModuleName(p)}</button>`).join('')}
     </div>
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
       <input class="form-input" id="searchInput" placeholder="🔍 搜索学员姓名/考试ID..." style="width:220px;padding:6px 10px;font-size:13px" value="${escapeHtml(state.searchQuery)}">
@@ -1020,10 +1064,10 @@ function renderMentorScoringSub(filter){
   }
 
   let html = '';
-  for (const panel of ['newbie','tech','sales','client','new_product']){
+  for (const panel of getAllModuleIds()){
     const group = groups[panel];
     if (!group || group.length === 0) continue;
-    html += `<div style="margin-bottom:12px"><strong>${PANEL_LABELS[panel]||panel}</strong></div>`;
+    html += `<div style="margin-bottom:12px"><strong>${getModuleName(panel)}</strong></div>`;
     html += `<div class="table-wrap"><table class="table">
       <thead><tr><th>学员</th><th>考试</th><th>自动评分</th><th>导师评分</th><th>最终</th><th>操作</th></tr></thead>
       <tbody>${group.sort((a,b) => new Date(b.submitTime) - new Date(a.submitTime)).map(r => {
@@ -1072,7 +1116,7 @@ function renderQBankContent(){
   const content = $('#mentorContent');
   if (!content || !_qbankData) return;
 
-  const panels = ['newbie','tech','sales','client','new_product'];
+  const panels = getAllModuleIds();
   let totalQ = 0;
   for (const p of panels){
     for (const g of (_qbankData.questions[p]||[])){
@@ -1088,7 +1132,7 @@ function renderQBankContent(){
           let count = 0;
           for (const g of (_qbankData.questions[p]||[])) count += (g.questions||[]).length;
           if (count === 0) return '';
-          return `<button class="btn btn-sm ${_qbankPanel===p?'btn-primary':'btn-outline'}" onclick="APP.filterQBankPanel('${p}')">${PANEL_LABELS[p]||p}（${count}）</button>`;
+          return `<button class="btn btn-sm ${_qbankPanel===p?'btn-primary':'btn-outline'}" onclick="APP.filterQBankPanel('${p}')">${getModuleName(p)}（${count}）</button>`;
         }).filter(Boolean).join('')}
       </div>
       <div style="display:flex;gap:8px">
@@ -1101,7 +1145,7 @@ function renderQBankContent(){
     const groups = _qbankData.questions[p] || [];
     if (groups.length === 0) continue;
 
-    html += `<div style="margin-bottom:20px"><div style="font-size:16px;font-weight:700;margin-bottom:12px;color:var(--primary)">${PANEL_LABELS[p]||p}</div>`;
+    html += `<div style="margin-bottom:20px"><div style="font-size:16px;font-weight:700;margin-bottom:12px;color:var(--primary)">${getModuleName(p)}</div>`;
 
     for (const g of groups){
       let questions = g.questions || [];
@@ -1522,52 +1566,194 @@ async function clearAllRecords(){
   } catch(e){ showToast('操作失败','error'); }
 }
 
-// ===== 新品管理 =====
-async function renderNewProducts(){
+// ===== 产品题库导入管理 =====
+async function renderProductBankManager(){
   const content = $('#mentorContent');
   if (!content) return;
   content.innerHTML = `<div class="empty-state"><div class="empty-state-text">加载中...</div></div>`;
 
   try {
-    const res = await api('/api/admin/new-products');
-    if (!res.success){ content.innerHTML = `<div class="empty-state"><div class="empty-state-text">加载失败</div></div>`; return; }
-    state.newProducts = res.products || [];
+    const modRes = await api('/api/admin/modules');
+    if (!modRes.success){ content.innerHTML = `<div class="empty-state"><div class="empty-state-text">加载失败</div></div>`; return; }
+    state.modules = { fixedModules: modRes.fixedModules || {}, customModules: modRes.customModules || {} };
+    state.allProducts = modRes.products || [];
+
+    const allModules = [...Object.entries(state.modules.fixedModules || {}), ...Object.entries(state.modules.customModules || {})];
 
     let html = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <h3 style="font-size:16px">新品日常考核管理（${state.newProducts.length}个）</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h3 style="font-size:16px">产品题库导入管理（${state.allProducts.length}个题库）</h3>
         <div style="display:flex;gap:8px">
           <button class="btn btn-sm btn-outline" onclick="APP.downloadTemplate()">📥 下载题库模板</button>
-          <button class="btn btn-sm btn-primary" onclick="APP.openImportProduct()">📤 导入新品题库</button>
+          <button class="btn btn-sm btn-primary" onclick="APP.openImportProduct()">📤 导入产品题库</button>
+          <button class="btn btn-sm btn-success" onclick="APP.openAddModule()">➕ 新建模块</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px;background:var(--warning-light);border:1px solid var(--warning)">
         <div style="font-size:13px;color:var(--warning);line-height:1.8">
           <strong>💡 使用说明：</strong><br>
-          1. 点击 <strong>"下载题库模板"</strong> 下载 Excel 模板文件（.xlsx）<br>
-          2. 在 Excel 中按模板格式填写题目：题型（单选题/多选题/判断题/简答题）、题目内容、选项、正确答案、分值等<br>
-          3. 填写完成后点击 <strong>"导入新品题库"</strong>，填写产品名称，上传编辑好的 Excel 即可自动生成新品考核<br>
-          4. 模板也可发给其他 AI 工具，要求按此格式批量生成题目
+          1. 下载 Excel 模板 → 填写题目 → 导入系统 → 分配题库到考核模块<br>
+          2. 模板也可发给其他 AI 工具，要求按此格式批量生成题目<br>
+          3. 导入后可分配到任意考核模块（新人专项/技术进阶/销售进阶/客户端考核/新品考核/自定义模块）
         </div>
       </div>`;
 
-    if (state.newProducts.length === 0){
-      html += `<div class="empty-state"><div class="empty-state-text">暂无新品考核，请导入题库</div></div>`;
+    // Section: 模块配置
+    html += `<h4 style="font-size:14px;margin-bottom:12px">📂 考核模块配置</h4>`;
+    html += `<div class="table-wrap"><table class="table">
+      <thead><tr><th>模块名称</th><th>图标</th><th>已分配题库</th><th>操作</th></tr></thead>
+      <tbody>`;
+
+    for (const [id, mod] of allModules) {
+      const bankNames = (mod.bankIds || []).map(bid => {
+        const p = state.allProducts.find(a => a.id === bid);
+        return p ? p.title : bid;
+      }).join('、') || '<span style="color:#94a3b8">无</span>';
+      const isCustom = (state.modules.customModules || {})[id];
+      html += `<tr>
+        <td><strong>${mod.icon||'📋'} ${escapeHtml(mod.name)}</strong>${isCustom ? ' <span class="badge badge-new-product">自定义</span>' : ''}</td>
+        <td>${escapeHtml(mod.icon||'')}</td>
+        <td style="font-size:12px">${bankNames}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm btn-outline" onclick="APP.openAssignBanks('${id}','${escapeHtml(mod.name)}')">分配题库</button>
+          ${isCustom ? `<button class="btn btn-sm btn-danger" onclick="APP.deleteModule('${id}')" style="margin-left:4px">删除</button>` : ''}
+        </td>
+      </tr>`;
+    }
+    html += `</tbody></table></div>`;
+
+    // Section: 已导入题库
+    html += `<h4 style="font-size:14px;margin:20px 0 12px">📦 已导入产品题库</h4>`;
+    if (state.allProducts.length === 0){
+      html += `<div class="empty-state"><div class="empty-state-text">暂无导入的题库，请先导入</div></div>`;
     } else {
       html += `<div class="table-wrap"><table class="table">
-        <thead><tr><th>产品名称</th><th>品牌</th><th>创建时间</th><th>操作</th></tr></thead>
-        <tbody>${state.newProducts.map(np => `
+        <thead><tr><th>产品名称</th><th>品牌</th><th>题目数</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody>${state.allProducts.map(np => {
+          // Calculate question count from the file
+          return `
           <tr>
             <td><strong>${escapeHtml(np.title)}</strong></td>
             <td>${escapeHtml(np.brand||'新品')}</td>
+            <td>${np.questionCount || '-'}</td>
             <td style="font-size:12px">${new Date(np.createdAt).toLocaleString('zh-CN')}</td>
-            <td><button class="btn btn-sm btn-danger" onclick="APP.deleteNewProduct('${np.id}')">删除</button></td>
-          </tr>`).join('')}</tbody>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm btn-danger" onclick="APP.deleteNewProduct('${np.id}')">删除</button>
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
       </table></div>`;
     }
 
     content.innerHTML = html;
   } catch(e){ content.innerHTML = `<div class="empty-state"><div class="empty-state-text">加载失败</div></div>`; }
+}
+
+function openAddModule(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:500px">
+      <div class="modal-header">
+        <span>新建考核模块</span>
+        <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">模块名称 *</label>
+          <input class="form-input" id="modName" placeholder="如：季度考核、产品专项">
+        </div>
+        <div class="form-group">
+          <label class="form-label">图标（Emoji）</label>
+          <input class="form-input" id="modIcon" placeholder="📋" value="📋">
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <input class="form-input" id="modDesc" placeholder="模块描述（选填）">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="APP.createModule()">创建模块</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function createModule(){
+  const name = $('#modName').value.trim();
+  if (!name){ showToast('请输入模块名称','error'); return; }
+  const icon = $('#modIcon').value.trim() || '📋';
+  const desc = $('#modDesc').value.trim();
+  try {
+    const res = await api('/api/admin/modules', { method:'POST', body:JSON.stringify({ name, icon, desc }) });
+    if (res.success){
+      showToast('模块创建成功','success');
+      document.querySelector('.modal-overlay')?.remove();
+      renderProductBankManager();
+    } else { showToast(res.error||'创建失败','error'); }
+  } catch(e){ showToast('网络错误','error'); }
+}
+
+async function deleteModule(moduleId){
+  if (!confirm('确定删除该模块？固定模块不可删除，自定义模块删除后其题库不会丢失。')) return;
+  try {
+    const res = await api(`/api/admin/modules/${moduleId}`, { method:'DELETE' });
+    if (res.success){
+      showToast('模块已删除','success');
+      renderProductBankManager();
+    } else { showToast(res.error||'删除失败','error'); }
+  } catch(e){ showToast('删除失败','error'); }
+}
+
+function openAssignBanks(moduleId, moduleName){
+  const mod = (state.modules.fixedModules || {})[moduleId] || (state.modules.customModules || {})[moduleId];
+  const currentBankIds = mod ? (mod.bankIds || []) : [];
+  const products = state.allProducts;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:600px">
+      <div class="modal-header">
+        <span>分配题库到「${escapeHtml(moduleName)}」</span>
+        <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+      </div>
+      <div class="modal-body">
+        ${products.length === 0 ? '<div class="empty-state"><div class="empty-state-text">暂无导入的题库，请先导入产品题库</div></div>' : `
+          <div style="font-size:13px;color:#64748b;margin-bottom:12px">勾选需要分配到该模块的产品题库（可多选）：</div>
+          ${products.map(p => {
+            const checked = currentBankIds.includes(p.id);
+            return `<label style="display:flex;align-items:center;padding:8px 12px;margin:4px 0;border:1px solid ${checked?'var(--primary)':'#e2e8f0'};border-radius:8px;cursor:pointer;background:${checked?'var(--primary-light)':'#fff'}">
+              <input type="checkbox" class="assignBankCb" data-bankid="${p.id}" ${checked?'checked':''} style="margin-right:10px">
+              <div>
+                <div style="font-weight:600;font-size:14px">${escapeHtml(p.title)}</div>
+                <div style="font-size:12px;color:#64748b">${escapeHtml(p.brand||'新品')} · ${p.questionCount||'?'}题</div>
+              </div>
+            </label>`;
+          }).join('')}
+        `}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="APP.saveAssignBanks('${moduleId}')">保存分配</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function saveAssignBanks(moduleId){
+  const checkboxes = document.querySelectorAll('.assignBankCb');
+  const bankIds = [];
+  checkboxes.forEach(cb => { if (cb.checked) bankIds.push(cb.dataset.bankid); });
+  try {
+    const res = await api(`/api/admin/modules/${moduleId}`, { method:'PUT', body:JSON.stringify({ bankIds }) });
+    if (res.success){
+      showToast('分配成功','success');
+      document.querySelector('.modal-overlay')?.remove();
+      renderProductBankManager();
+    } else { showToast(res.error||'保存失败','error'); }
+  } catch(e){ showToast('网络错误','error'); }
 }
 
 async function downloadTemplate(){
@@ -1581,7 +1767,7 @@ async function downloadTemplate(){
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = blobUrl;
-    a.download = '新品题库导入模板.xlsx';
+    a.download = '产品题库导入模板.xlsx';
     a.click();
     URL.revokeObjectURL(blobUrl);
     showToast('Excel模板已下载，请用Excel/WPS打开编辑','success');
@@ -1594,7 +1780,7 @@ function openImportProduct(){
   overlay.innerHTML = `
     <div class="modal fade-in" style="max-width:600px">
       <div class="modal-header">
-        <span>导入新品题库</span>
+        <span>导入产品题库</span>
         <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
       </div>
       <div class="modal-body">
@@ -1625,7 +1811,7 @@ function openImportProduct(){
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
         <button class="btn btn-outline" onclick="APP.downloadTemplate()" style="margin-right:8px">下载模板</button>
-        <button class="btn btn-primary" id="npImportBtn" onclick="APP.importNewProduct()">导入生成考核</button>
+        <button class="btn btn-primary" id="npImportBtn" onclick="APP.importNewProduct()">导入题库</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1635,18 +1821,14 @@ function handleNpFile(input){
   const file = input.files[0];
   if (!file) return;
   const infoEl = $('#npFileInfo');
-  
-  // 判断文件类型
   const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
   const isJson = file.name.endsWith('.json');
   
   if (isExcel) {
-    // Excel 文件：直接显示文件信息，等待提交时上传
     if (infoEl) {
       infoEl.innerHTML = `已选择：<strong>${escapeHtml(file.name)}</strong>（${(file.size/1024).toFixed(1)} KB）`;
       infoEl.style.display = 'block';
     }
-    // 清空 JSON 文本框
     const jsonEl = $('#npJson');
     if (jsonEl) jsonEl.value = '';
     return;
@@ -1691,7 +1873,6 @@ async function importNewProduct(){
   try {
     let res;
     if (isExcel) {
-      // Excel 文件上传
       const formData = new FormData();
       formData.append('file', file);
       formData.append('title', title);
@@ -1703,7 +1884,6 @@ async function importNewProduct(){
       });
       res = await resp.json();
     } else {
-      // JSON 导入
       let questions;
       try { questions = JSON.parse(jsonStr); } catch(e){ showToast('JSON格式错误','error'); return; }
       if (!Array.isArray(questions) || questions.length === 0){ showToast('题目列表不能为空','error'); return; }
@@ -1713,22 +1893,20 @@ async function importNewProduct(){
     }
     
     if (res.success){
-      showToast(`新品"${title}"创建成功！${res.questionCount}道题`,'success');
+      showToast(`题库"${title}"导入成功！${res.questionCount}道题`,'success');
       document.querySelector('.modal-overlay')?.remove();
-      state.newProducts.push(res.product);
-      renderNewProducts();
-    } else { showToast(res.error||'创建失败','error'); }
+      renderProductBankManager();
+    } else { showToast(res.error||'导入失败','error'); }
   } catch(e){ showToast('网络错误','error'); }
 }
 
 async function deleteNewProduct(productId){
-  if (!confirm('确定删除该新品考核？')) return;
+  if (!confirm('确定删除该产品题库？题库文件也会被删除！')) return;
   try {
     const res = await api(`/api/admin/new-products/${productId}`, { method:'DELETE' });
     if (res.success){
       showToast('已删除','success');
-      state.newProducts = state.newProducts.filter(p => p.id !== productId);
-      renderNewProducts();
+      renderProductBankManager();
     } else { showToast('删除失败','error'); }
   } catch(e){ showToast('删除失败','error'); }
 }
@@ -1957,14 +2135,6 @@ async function saveAssignment(mentorUsername){
   } catch(e){ showToast('保存失败','error'); }
 }
 
-// ===== 加载新品列表 =====
-async function loadNewProducts(){
-  try {
-    const res = await api('/api/admin/new-products');
-    if (res.success) state.newProducts = res.products || [];
-  } catch(e){}
-}
-
 // ===== 恢复会话 =====
 function restoreSession(){
   const token = localStorage.getItem('quiz_auth_token');
@@ -1974,7 +2144,6 @@ function restoreSession(){
       state.authToken = token;
       state.currentUser = JSON.parse(user);
       state.page = 'home';
-      loadNewProducts();
     } catch(e){
       state.page = 'login';
     }
@@ -2000,8 +2169,9 @@ window.APP = {
   openEditQuestion, saveEditQuestion, openAddQuestion, saveAddQuestion, deleteQuestion,
   // Weak Areas
   renderMentorWeakAreas, viewStudentWeakDetail,
-  // New Products
-  renderNewProducts, downloadTemplate, openImportProduct, handleNpFile, importNewProduct, deleteNewProduct,
+  // New Products → Product Bank Manager
+  renderProductBankManager, downloadTemplate, openImportProduct, handleNpFile, importNewProduct, deleteNewProduct,
+  openAddModule, createModule, deleteModule, openAssignBanks, saveAssignBanks,
   // Admin
   openCreateMentor, createMentor, resetUserPassword, deleteUser,
   toggleStudentChip, saveAssignment,
@@ -2011,7 +2181,6 @@ window.APP = {
 
 // ===== 初始化 =====
 restoreSession();
-loadNewProducts();
 render();
 
 })();
