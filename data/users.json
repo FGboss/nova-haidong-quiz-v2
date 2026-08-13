@@ -21,5 +21,12 @@
     "password": "9583491489fba35a1c679ad4673343ebd9ca9e61734e1176c51afefc6cad40ea",
     "role": "mentor",
     "createdAt": "2026-08-13T15:36:28.905Z"
+  },
+  "邱洁标": {
+    "username": "邱洁标",
+    "name": "邱洁标",
+    "password": "bb6d497849c8370605b80ff4cccb399b27a591b4d4b274a12a3ad4556dad03e5",
+    "role": "mentor",
+    "createdAt": "2026-08-13T15:40:38.325Z"
   }
 }
