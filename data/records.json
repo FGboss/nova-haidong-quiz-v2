@@ -384,90 +384,9 @@
     "submitTime": "2026-08-13T02:00:00.000Z",
     "id": "r_1786585847638_eac9eq",
     "autoScore": 87,
-    "finalScore": 87,
-    "passed": false,
-    "questionScores": {
-      "w1d1_q8": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q1": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q3": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q4": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q2": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q6": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q7": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q5": {
-        "score": 4,
-        "maxScore": 4
-      },
-      "w1d1_q9": {
-        "score": 6,
-        "maxScore": 6
-      },
-      "w1d1_q10": {
-        "score": 6,
-        "maxScore": 6
-      },
-      "w1d1_q11": {
-        "score": 6,
-        "maxScore": 6
-      },
-      "w1d1_q12": {
-        "score": 6,
-        "maxScore": 6
-      },
-      "w1d4_q12": {
-        "score": 6,
-        "maxScore": 6
-      },
-      "w1d1_q13": {
-        "score": 5,
-        "maxScore": 5
-      },
-      "w1d1_q15": {
-        "score": 5,
-        "maxScore": 5
-      },
-      "w1d1_q14": {
-        "score": 5,
-        "maxScore": 5
-      },
-      "w1d1_q16": {
-        "score": 5,
-        "maxScore": 5
-      },
-      "w1d2_q13": {
-        "score": 5,
-        "maxScore": 5
-      },
-      "w1d1_q18": {
-        "score": 0,
-        "maxScore": 9
-      },
-      "w1d1_q17": {
-        "score": 0,
-        "maxScore": 4
-      }
-    },
+    "finalScore": 97,
+    "passed": true,
+    "questionScores": {},
     "typeScores": {
       "single": {
         "score": 32,
@@ -482,10 +401,11 @@
         "max": 25
       },
       "short": {
-        "score": 0,
+        "score": 10,
         "max": 13
       }
     },
-    "mentorScored": false
+    "mentorScored": true,
+    "mentorScore": 10
   }
 ]
