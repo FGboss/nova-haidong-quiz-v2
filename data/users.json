@@ -13,5 +13,13 @@
     "password": "236977126d6375b9fa5f7ec7d7d7055cf36741c990d9c788f68a8427b08cdf08",
     "role": "mentor",
     "createdAt": "2026-08-13T12:11:38.781Z"
+  },
+  "student01": {
+    "username": "student01",
+    "name": "李学员",
+    "password": "c079b93d71c13c8b44e0d8e55abbdf1fe006e01f67a8b95c45500fb0df3598f8",
+    "role": "student",
+    "token": "tk_16b878d2ee77135f862f811cd1d831838c4612ce2fe383a5",
+    "createdAt": "2026-08-13T12:12:35.472Z"
   }
 }
