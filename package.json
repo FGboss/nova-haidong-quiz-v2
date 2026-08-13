@@ -1,0 +1,17 @@
+{
+  "name": "nova-haidong-quiz-v2",
+  "version": "2.0.0",
+  "description": "诺瓦&嗨动 产品培训考核系统 V2 — 三大板块：新人专项 / 技术进阶 / 销售进阶",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
