@@ -6,5 +6,12 @@
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
     "token": "tk_fcf771848dea385e155c0b08161a5850fad7a0dc3c2e77a8"
+  },
+  "mentor01": {
+    "username": "mentor01",
+    "name": "张导师",
+    "password": "236977126d6375b9fa5f7ec7d7d7055cf36741c990d9c788f68a8427b08cdf08",
+    "role": "mentor",
+    "createdAt": "2026-08-13T12:11:38.781Z"
   }
 }
