@@ -5,7 +5,7 @@
     "role": "admin",
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
-    "token": "tk_42fc82ca8bf033468f6dcd20b61f176701e00c2cb97a7983"
+    "token": "tk_0d2554b414eecd102850c0251dfc4fb016460367f86516af"
   },
   "mentor01": {
     "username": "mentor01",
@@ -29,6 +29,6 @@
     "password": "37dc42144060b12ae66e899d40abfa204b4bcfd34d98acdcf6f1177d1cddaead",
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
-    "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
+    "token": "tk_783cde537440a57e96a16e40e3433bc5f06e35861b0cb20c"
   }
 }
