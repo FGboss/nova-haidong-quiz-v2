@@ -850,5 +850,64 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "李学员",
+    "examId": "client_nova_led",
+    "panel": "client",
+    "questions": [
+      {
+        "id": "client_nova_led_q1",
+        "type": "single",
+        "points": 5,
+        "answer": "B"
+      },
+      {
+        "id": "client_nova_led_q2",
+        "type": "single",
+        "points": 5,
+        "answer": "A"
+      }
+    ],
+    "answers": {
+      "client_nova_led_q1": "B",
+      "client_nova_led_q2": "A"
+    },
+    "attemptNumber": 1,
+    "submitTime": "2026-08-13T12:30:00.000Z",
+    "timeSpent": 120,
+    "id": "r_1786623382286_iswv63",
+    "autoScore": 10,
+    "finalScore": 10,
+    "passed": false,
+    "questionScores": {
+      "client_nova_led_q1": {
+        "score": 5,
+        "maxScore": 5
+      },
+      "client_nova_led_q2": {
+        "score": 5,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 10,
+        "max": 10
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
