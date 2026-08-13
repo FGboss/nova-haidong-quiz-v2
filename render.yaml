@@ -5,4 +5,10 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     plan: free
+    healthCheckPath: /
     autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GH_REPO
+        value: FGboss/nova-haidong-quiz-v2
