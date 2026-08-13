@@ -1,3 +1,4 @@
+// V2.1 - Module Management System (2026-08-13)
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -439,7 +440,7 @@ const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销
 
 // 健康检查
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, time: new Date().toISOString(), panels: getAllPanels() });
+  res.json({ success: true, time: new Date().toISOString(), version: '2.1', panels: getAllPanels() });
 });
 
 // ===== 用户认证 API =====
