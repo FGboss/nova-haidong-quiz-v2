@@ -33,7 +33,9 @@
       "name": "新品考核",
       "icon": "🆕",
       "desc": "新品培训考核，持续更新中",
-      "bankIds": []
+      "bankIds": [
+        "np_1786635138091"
+      ]
     }
   },
   "customModules": {}
