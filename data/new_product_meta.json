@@ -1,1 +1,15 @@
-{}
+{
+  "np_1786628405995": {
+    "id": "np_1786628405995",
+    "title": "诺瓦控制系统介绍",
+    "brand": "诺瓦",
+    "questionFile": "new_product/np_1786628405995.js",
+    "distribution": {
+      "single": 10,
+      "multiple": 5,
+      "judge": 4,
+      "short": 1
+    },
+    "createdAt": "2026-08-13T13:40:05.997Z"
+  }
+}
