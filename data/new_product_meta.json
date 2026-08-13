@@ -24,5 +24,18 @@
       "short": 1
     },
     "createdAt": "2026-08-13T13:40:49.665Z"
+  },
+  "np_1786628498490": {
+    "id": "np_1786628498490",
+    "title": "诺瓦控制系统介绍2",
+    "brand": "诺瓦",
+    "questionFile": "new_product/np_1786628498490.js",
+    "distribution": {
+      "single": 10,
+      "multiple": 5,
+      "judge": 4,
+      "short": 1
+    },
+    "createdAt": "2026-08-13T13:41:38.491Z"
   }
 }
