@@ -11,5 +11,18 @@
       "short": 1
     },
     "createdAt": "2026-08-13T13:40:05.997Z"
+  },
+  "np_1786628449665": {
+    "id": "np_1786628449665",
+    "title": "嗨动控制系统",
+    "brand": "嗨动",
+    "questionFile": "new_product/np_1786628449665.js",
+    "distribution": {
+      "single": 10,
+      "multiple": 5,
+      "judge": 4,
+      "short": 1
+    },
+    "createdAt": "2026-08-13T13:40:49.665Z"
   }
 }
