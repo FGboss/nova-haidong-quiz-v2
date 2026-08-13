@@ -1,25 +1,10 @@
 {
-  "u_1786544807775_nfxi": {
-    "id": "u_1786544807775_nfxi",
-    "name": "李雯锋",
-    "createdAt": "2026-08-12T14:26:47.775Z"
-  },
-  "u_1786585974695_pycr": {
-    "id": "u_1786585974695_pycr",
-    "name": "浏览器测试",
-    "createdAt": "2026-08-13T01:52:54.695Z"
-  },
-  "u_1786588934634_438j": {
-    "id": "u_1786588934634_438j",
-    "name": "苏永林",
-    "createdAt": "2026-08-13T02:42:14.634Z"
-  },
   "PC": {
     "username": "PC",
     "password": "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
     "role": "admin",
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
-    "token": "tk_cfe29fc6fe79fabbab98af85da75498029fe473b724da6c3"
+    "token": "tk_db4b5cfd905bae1f1e1dfc540bf442ad1ec054e8cfdf8a37"
   }
 }

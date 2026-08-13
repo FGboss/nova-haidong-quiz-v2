@@ -5,6 +5,18 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
+// Global error handlers - log but don't crash
+process.on('uncaughtException', (err) => {
+  console.error('[ERROR] uncaughtException:', err.message);
+  console.error(err.stack);
+  // Don't exit - keep server running
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[ERROR] unhandledRejection:', reason);
+  if (reason && reason.stack) console.error(reason.stack);
+  // Don't exit - keep server running
+});
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -64,24 +76,35 @@ function gitPersist() {
   if (persistPending) return;
   persistPending = true;
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(async () => {
+  persistTimer = setTimeout(() => {
     persistPending = false;
     let saved = false;
-    try { await ghApiPersist(); saved = true; console.log('[persist] GitHub API persist OK'); } catch(e) { console.error('[persist] GitHub API persist failed:', e.message); }
-    try {
-      const gitDir = path.join(__dirname, '.git');
-      if (fs.existsSync(gitDir)) {
-        execSync('git add data/', { cwd: __dirname, stdio: 'pipe', timeout: 10000 });
-        const diff = execSync('git diff --cached --name-only', { cwd: __dirname, stdio: 'pipe', timeout: 5000 }).toString().trim();
-        if (diff) {
-          execSync(`git commit -m "data: auto-persist"`, { cwd: __dirname, stdio: 'pipe', timeout: 10000 });
-          execSync('git push origin master', { cwd: __dirname, stdio: 'pipe', timeout: 15000 });
-          console.log('[persist] Git push OK'); saved = true;
+    // 先尝试 GitHub API 持久化
+    ghApiPersist().then(() => {
+      saved = true;
+      console.log('[persist] GitHub API persist OK');
+    }).catch(e => {
+      console.error('[persist] GitHub API persist failed:', e.message);
+    }).finally(() => {
+      // 再尝试 Git push
+      try {
+        const gitDir = path.join(__dirname, '.git');
+        if (fs.existsSync(gitDir)) {
+          try {
+            execSync('git add data/', { cwd: __dirname, stdio: 'pipe', timeout: 10000 });
+          } catch(e) { /* git add 失败不致命 */ }
+          try {
+            const diff = execSync('git diff --cached --name-only', { cwd: __dirname, stdio: 'pipe', timeout: 5000 }).toString().trim();
+            if (diff) {
+              try { execSync('git commit -m "data: auto-persist"', { cwd: __dirname, stdio: 'pipe', timeout: 10000 }); } catch(e) {}
+              try { execSync('git push origin master', { cwd: __dirname, stdio: 'pipe', timeout: 15000 }); console.log('[persist] Git push OK'); saved = true; } catch(e) { console.log('[persist] Git push failed:', e.message); }
+            }
+          } catch(e) { /* diff 失败不致命 */ }
         }
-      }
-    } catch(e) { console.log('[persist] Git push failed (non-critical):', e.message); }
-    if (!saved) console.error('[persist] CRITICAL: All persistence methods failed!');
-  }, 1000);
+      } catch(e) { console.log('[persist] Git operations failed:', e.message); }
+      if (!saved) console.error('[persist] CRITICAL: All persistence methods failed!');
+    });
+  }, 2000);
 }
 
 async function ghApiPersist() {
@@ -110,41 +133,44 @@ async function ghApiPersist() {
   }
 }
 
-// ===== 启动时数据恢复 =====
-(async function setupGit() {
+// ===== 启动时数据恢复（同步安全版） =====
+function setupGit() {
   let dataRestored = false;
   try {
     const gitDir = path.join(__dirname, '.git');
     if (fs.existsSync(gitDir)) {
-      execSync(`git remote set-url origin https://${HARDCODED_GH_TOKEN}@github.com/${GH_REPO}.git`, { cwd: __dirname, stdio: 'pipe' });
-      execSync('git config user.email "quiz-bot@nova.com"', { cwd: __dirname, stdio: 'pipe' });
-      execSync('git config user.name "Nova Quiz Bot"', { cwd: __dirname, stdio: 'pipe' });
+      try {
+        execSync('git config user.email "quiz-bot@nova.com"', { cwd: __dirname, stdio: 'pipe', timeout: 5000 });
+        execSync('git config user.name "Nova Quiz Bot"', { cwd: __dirname, stdio: 'pipe', timeout: 5000 });
+      } catch(e) { /* non-critical */ }
       try {
         execSync('git fetch origin master 2>/dev/null', { cwd: __dirname, stdio: 'pipe', timeout: 15000 });
         execSync('git checkout origin/master -- data/ 2>/dev/null', { cwd: __dirname, stdio: 'pipe', timeout: 10000 });
         console.log('[setup] Data restored via git pull'); dataRestored = true;
-      } catch(e2) { console.log('[setup] Git pull failed:', e2.message); }
+      } catch(e2) { console.log('[setup] Git pull failed (non-critical):', e2.message); }
     }
   } catch(e) { console.log('[setup] Git config skipped:', e.message); }
   if (!dataRestored) {
     try {
       const https = require('https');
-      for (const f of ['records.json', 'users.json', 'mentors.json']) {
+      const filesToRestore = ['records.json', 'users.json', 'mentors.json'];
+      for (const f of filesToRestore) {
         const localPath = path.join(DATA_DIR, f);
         if (fs.existsSync(localPath) && fs.statSync(localPath).size > 10) continue;
-        const content = await new Promise((resolve) => {
-          const req = https.get({
-            hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`,
-            headers: { 'User-Agent': 'NovaQuizV3/1.0', 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3.raw' }
-          }, (res) => { if (res.statusCode !== 200) { resolve(null); return; } let b = ''; res.on('data', d => b += d); res.on('end', () => resolve(b)); });
-          req.on('error', () => resolve(null));
-        });
-        if (content) { fs.writeFileSync(localPath, content); console.log(`[setup] Restored ${f} via GitHub API`); dataRestored = true; }
+        try {
+          const content = execSync(`curl -s -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`, { timeout: 10000, stdio: 'pipe' }).toString();
+          if (content && content.length > 10 && !content.startsWith('{')) {
+            fs.writeFileSync(localPath, content);
+            console.log('[setup] Restored ' + f + ' via GitHub API');
+            dataRestored = true;
+          }
+        } catch(e3) { /* skip */ }
       }
     } catch(e) { console.log('[setup] GitHub API restore failed:', e.message); }
   }
-  if (!dataRestored) console.log('[setup] WARNING: Could not restore data from GitHub.');
-})();
+  if (!dataRestored) console.log('[setup] Starting with fresh/local data.');
+}
+setupGit();
 
 // ===== 初始化超级管理员 =====
 function initSuperAdmin() {
@@ -483,7 +509,9 @@ app.post('/api/admin/mentors', adminAuth, (req, res) => {
 // 管理员获取所有用户列表
 app.get('/api/admin/users', adminAuth, (req, res) => {
   const users = readObj('users.json');
-  const list = Object.values(users).map(u => ({ username: u.username, name: u.name, role: u.role, createdAt: u.createdAt }));
+  const list = Object.values(users)
+    .filter(u => u.username && u.role)
+    .map(u => ({ username: u.username, name: u.name, role: u.role, createdAt: u.createdAt }));
   const mentors = readObj('mentors.json');
   // 附加导师-学员关系
   for (const u of list) {
@@ -901,8 +929,8 @@ app.delete('/api/mentor/questions/:examId/:questionId', mentorAuth, (req, res) =
 
 // ===== 新品日常考核管理 =====
 
-// 获取新品列表
-app.get('/api/admin/new-products', mentorAuth, (req, res) => {
+// 获取新品列表（所有登录用户可查看，但只有导师/管理员可管理）
+app.get('/api/admin/new-products', authMiddleware, (req, res) => {
   const meta = readObj('new_product_meta.json');
   res.json({ success: true, products: Object.values(meta) });
 });
