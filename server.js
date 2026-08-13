@@ -4,6 +4,9 @@ const path = require('path');
 const cors = require('cors');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const XLSX = require('xlsx');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Global error handlers - log but don't crash
 process.on('uncaughtException', (err) => {
@@ -993,43 +996,220 @@ app.delete('/api/admin/new-products/:productId', mentorAuth, (req, res) => {
   res.json({ success: true });
 });
 
-// 下载题库模板
+// 下载题库模板（Excel格式）
 app.get('/api/admin/question-template', mentorAuth, (req, res) => {
-  const template = {
-    title: '产品名称',
-    brand: '诺瓦/嗨动',
-    questions: [
-      {
-        type: 'single',
-        question: '示例单选题：LED显示屏的像素间距是指？',
-        options: ['A. 两个像素点中心之间的距离', 'B. LED灯珠的直径', 'C. 模组的尺寸', 'D. 箱体的尺寸'],
-        answer: 'A',
-        points: 5,
-        explanation: '像素间距是LED显示屏的核心参数之一'
-      },
-      {
-        type: 'multiple',
-        question: '示例多选题：以下哪些是诺瓦的控制系统产品？',
-        options: ['A. V系列', 'B. H系列', 'C. TB系列', 'D. iPhone'],
-        answer: 'ABC',
-        points: 5
-      },
-      {
-        type: 'judge',
-        question: '示例判断题：诺瓦科技成立于2008年。',
-        answer: 'A',
-        points: 5,
-        explanation: 'A=正确，B=错误'
-      },
-      {
-        type: 'short',
-        question: '示例简答题：请简述LED显示屏的主要应用场景。',
-        keywords: '广告,舞台,会议,监控,体育',
-        points: 10
+  const format = req.query.format || 'xlsx';
+
+  if (format === 'json') {
+    // 保留 JSON 格式作为兼容
+    const template = {
+      title: '产品名称', brand: '诺瓦/嗨动',
+      questions: [
+        { type: 'single', question: '示例单选题：LED显示屏的像素间距是指？', options: ['A. 两个像素点中心之间的距离', 'B. LED灯珠的直径', 'C. 模组的尺寸', 'D. 箱体的尺寸'], answer: 'A', points: 5, explanation: '像素间距是LED显示屏的核心参数之一' },
+        { type: 'multiple', question: '示例多选题：以下哪些是诺瓦的控制系统产品？', options: ['A. V系列', 'B. H系列', 'C. TB系列', 'D. iPhone'], answer: 'ABC', points: 5 },
+        { type: 'judge', question: '示例判断题：诺瓦科技成立于2008年。', answer: 'A', points: 5, explanation: 'A=正确，B=错误' },
+        { type: 'short', question: '示例简答题：请简述LED显示屏的主要应用场景。', keywords: '广告,舞台,会议,监控,体育', points: 10 }
+      ]
+    };
+    return res.json({ success: true, template });
+  }
+
+  // ===== Excel 模板生成 =====
+  const wb = XLSX.utils.book_new();
+
+  // ---- Sheet 1: 使用说明 ----
+  const instructions = [
+    ['诺瓦&嗨动 新品题库导入模板 - 使用说明'],
+    [''],
+    ['📌 本模板用于批量导入新品考核题目，请按照以下规则填写"题库模板"工作表：'],
+    [''],
+    ['一、列说明：'],
+    ['  题型', '必填。可选值：单选题 / 多选题 / 判断题 / 简答题'],
+    ['  题目内容', '必填。题目的完整文字描述'],
+    ['  选项A', '单选题、多选题必填。第一个选项的文本'],
+    ['  选项B', '单选题、多选题必填。第二个选项的文本'],
+    ['  选项C', '单选题、多选题选填。第三个选项的文本'],
+    ['  选项D', '单选题、多选题选填。第四个选项的文本'],
+    ['  正确答案', '必填。单选题填A/B/C/D；多选题填选项组合如ABC；判断题填"对"或"错"；简答题填参考答案'],
+    ['  分值', '必填。默认5分，简答题建议8-10分。系统会自动归一化到100分'],
+    ['  答案解析', '选填。对答案的补充说明，学员提交后可查看'],
+    ['  关键词', '简答题必填。多个关键词用逗号分隔，用于自动评分匹配'],
+    [''],
+    ['二、题目类型说明：'],
+    ['  单选题', '只有一个正确答案，学员从A/B/C/D中选一个'],
+    ['  多选题', '有多个正确答案，学员从A/B/C/D中选多个，如"ABC"'],
+    ['  判断题', '只有"对"或"错"两个选项，正确答案填"对"或"错"'],
+    ['  简答题', '学员自由输入文字答案，系统根据关键词自动评分'],
+    [''],
+    ['三、注意事项：'],
+    ['  1. 请勿修改表头行（第1行）'],
+    ['  2. 每行一道题目，示例数据可以直接删除'],
+    ['  3. 系统会自动为每道题生成唯一ID，无需手动填写'],
+    ['  4. 总分值系统会自动归一化到100分，但建议每题分值合理设置'],
+    ['  5. 导入时需填写产品名称和选择品牌'],
+    ['  6. 也可将此模板发给其他AI工具，要求按此格式批量生成题目'],
+    [''],
+    ['四、模板中的示例数据仅供参考，导入前请删除或替换为实际题目。'],
+  ];
+  const wsInst = XLSX.utils.aoa_to_sheet(instructions);
+  wsInst['!cols'] = [{ wch: 80 }];
+  XLSX.utils.book_append_sheet(wb, wsInst, '使用说明');
+
+  // ---- Sheet 2: 题库模板 ----
+  const headers = ['题型', '题目内容', '选项A', '选项B', '选项C', '选项D', '正确答案', '分值', '答案解析', '关键词'];
+  const sampleData = [
+    ['单选题', 'LED显示屏的像素间距是指什么？', 'A. 两个像素点中心之间的距离', 'B. LED灯珠的直径', 'C. 模组的尺寸', 'D. 箱体的尺寸', 'A', 5, '像素间距（Pixel Pitch）是LED显示屏最核心的参数之一，单位是mm，数值越小清晰度越高。'],
+    ['单选题', '诺瓦科技成立于哪一年？', 'A. 2006年', 'B. 2008年', 'C. 2010年', 'D. 2012年', 'B', 5, '诺瓦科技（NovaStar）成立于2008年，总部位于西安。'],
+    ['多选题', '以下哪些是诺瓦的控制系统产品系列？', 'A. V系列', 'B. H系列', 'C. TB系列', 'D. iPhone系列', 'ABC', 5, 'V系列、H系列、TB系列均为诺瓦控制系统产品线。'],
+    ['多选题', 'LED显示屏的主要应用场景包括？', 'A. 户外广告', 'B. 舞台演出', 'C. 会议显示', 'D. 监控指挥', 'ABCD', 5, ''],
+    ['判断题', '像素间距越小，LED显示屏的清晰度越高。', '', '', '', '', '对', 5, '像素间距越小意味着单位面积内像素点越多，显示效果越清晰。'],
+    ['判断题', '诺瓦科技只做LED控制系统，不做视频拼接处理器。', '', '', '', '', '错', 5, '诺瓦科技产品线包括LED控制系统、视频拼接处理器、整机方案等。'],
+    ['简答题', '请简述LED显示屏的主要组成部分。', '', '', '', '', 'LED灯珠,驱动IC,控制系统,电源,箱体结构', 10, ''],
+    ['简答题', '请列举诺瓦控制系统在LED显示屏中的主要功能。', '', '', '', '', '亮度调节,色温校准,画面拼接,信号传输,监控管理', 10, ''],
+  ];
+
+  const sheetData = [headers, ...sampleData];
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+  // 设置列宽
+  ws['!cols'] = [
+    { wch: 10 },  // 题型
+    { wch: 45 },  // 题目内容
+    { wch: 30 },  // 选项A
+    { wch: 30 },  // 选项B
+    { wch: 30 },  // 选项C
+    { wch: 30 },  // 选项D
+    { wch: 15 },  // 正确答案
+    { wch: 8 },   // 分值
+    { wch: 40 },  // 答案解析
+    { wch: 30 },  // 关键词
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, '题库模板');
+
+  // 生成 Buffer
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.set('Content-Disposition', 'attachment; filename="' + encodeURIComponent('新品题库导入模板') + '.xlsx"');
+  res.send(buf);
+});
+
+// 导入新品题库（支持 Excel .xlsx 和 JSON）
+app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), (req, res) => {
+  const title = req.body.title;
+  const brand = req.body.brand || '新品';
+  if (!title) return res.status(400).json({ error: '请提供产品名称' });
+
+  let questions = [];
+
+  // 优先处理 Excel 文件上传
+  if (req.file) {
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const sheetName = wb.SheetNames.find(n => n.includes('模板') || n.includes('题库')) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      if (rows.length < 2) return res.status(400).json({ error: 'Excel文件中没有数据，请至少填写一行题目' });
+
+      // 找表头行
+      let headerRow = -1;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i] || [];
+        if (row[0] && (String(row[0]).includes('题型') || row[0] === '题型')) { headerRow = i; break; }
       }
-    ]
+      if (headerRow < 0) return res.status(400).json({ error: '未找到表头行，请保留"题型"表头' });
+
+      const typeMap = {
+        '单选题': 'single', '单选': 'single', 'single': 'single',
+        '多选题': 'multiple', '多选': 'multiple', 'multiple': 'multiple',
+        '判断题': 'judge', '判断': 'judge', 'judge': 'judge',
+        '简答题': 'short', '简答': 'short', 'short': 'short',
+      };
+
+      for (let i = headerRow + 1; i < rows.length; i++) {
+        const row = rows[i] || [];
+        const typeRaw = String(row[0] || '').trim();
+        const questionText = String(row[1] || '').trim();
+        if (!typeRaw || !questionText) continue; // 跳过空行
+
+        const type = typeMap[typeRaw] || 'single';
+        const options = [];
+        if (row[2]) options.push(String(row[2]).trim());
+        if (row[3]) options.push(String(row[3]).trim());
+        if (row[4]) options.push(String(row[4]).trim());
+        if (row[5]) options.push(String(row[5]).trim());
+
+        let answer = String(row[6] || '').trim();
+        // 判断题答案标准化
+        if (type === 'judge') {
+          if (answer === '对' || answer === '正确' || answer === 'A') answer = 'A';
+          else if (answer === '错' || answer === '错误' || answer === 'B') answer = 'B';
+        }
+
+        const points = parseInt(row[7]) || 5;
+        const explanation = String(row[8] || '').trim();
+        const keywords = String(row[9] || '').trim();
+
+        questions.push({
+          type, question: questionText,
+          options: options.length > 0 ? options : undefined,
+          answer, points,
+          explanation: explanation || undefined,
+          keywords: keywords || undefined,
+        });
+      }
+
+      if (questions.length === 0) return res.status(400).json({ error: '未解析到有效题目，请检查格式是否正确' });
+    } catch (e) {
+      console.error('[import] Excel parse error:', e);
+      return res.status(400).json({ error: 'Excel文件解析失败：' + e.message });
+    }
+  }
+  // JSON 文本导入
+  else if (req.body.jsonData) {
+    try {
+      const data = JSON.parse(req.body.jsonData);
+      if (Array.isArray(data)) questions = data;
+      else if (data.questions && Array.isArray(data.questions)) questions = data.questions;
+      else return res.status(400).json({ error: 'JSON格式不正确' });
+    } catch (e) {
+      return res.status(400).json({ error: 'JSON解析失败：' + e.message });
+    }
+  }
+  else {
+    return res.status(400).json({ error: '请上传Excel文件或粘贴JSON数据' });
+  }
+
+  if (questions.length === 0) return res.status(400).json({ error: '题目列表不能为空' });
+
+  // 创建新品考核
+  const productId = 'np_' + Date.now();
+  const fileName = `new_product/${productId}.js`;
+  const filePath = path.join(__dirname, 'questions', fileName);
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  for (let i = 0; i < questions.length; i++) {
+    if (!questions[i].id) questions[i].id = productId + '_q' + (i + 1);
+    if (!questions[i].points) questions[i].points = 5;
+    if (!questions[i].type) questions[i].type = 'single';
+  }
+
+  const varName = 'QUESTIONS_' + productId;
+  const content = `// ${title} - 新品题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
+  fs.writeFileSync(filePath, content, 'utf8');
+
+  const meta = readObj('new_product_meta.json');
+  meta[productId] = {
+    id: productId, title, brand: brand || '新品',
+    questionFile: fileName, distribution: { single: 10, multiple: 5, judge: 4, short: 1 },
+    createdAt: new Date().toISOString()
   };
-  res.json({ success: true, template });
+  writeObj('new_product_meta.json', meta);
+
+  res.json({ success: true, product: meta[productId], questionCount: questions.length });
 });
 
 // ===== 查缺补漏看板 =====

@@ -1542,8 +1542,12 @@ async function renderNewProducts(){
         </div>
       </div>
       <div class="card" style="margin-bottom:16px;background:var(--warning-light);border:1px solid var(--warning)">
-        <div style="font-size:13px;color:var(--warning)">
-          <strong>💡 使用说明：</strong>下载题库模板JSON文件，按照格式准备好题目和答案，然后导入即可自动生成新品考核。题目类型支持单选(single)、多选(multiple)、判断(judge)、简答(short)，每题需设置分值和正确答案。
+        <div style="font-size:13px;color:var(--warning);line-height:1.8">
+          <strong>💡 使用说明：</strong><br>
+          1. 点击 <strong>"下载题库模板"</strong> 下载 Excel 模板文件（.xlsx）<br>
+          2. 在 Excel 中按模板格式填写题目：题型（单选题/多选题/判断题/简答题）、题目内容、选项、正确答案、分值等<br>
+          3. 填写完成后点击 <strong>"导入新品题库"</strong>，填写产品名称，上传编辑好的 Excel 即可自动生成新品考核<br>
+          4. 模板也可发给其他 AI 工具，要求按此格式批量生成题目
         </div>
       </div>`;
 
@@ -1568,15 +1572,19 @@ async function renderNewProducts(){
 
 async function downloadTemplate(){
   try {
-    const res = await api('/api/admin/question-template');
-    if (res.success){
-      const blob = new Blob([JSON.stringify(res.template, null, 2)], { type:'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'question_template.json'; a.click();
-      URL.revokeObjectURL(url);
-      showToast('模板已下载','success');
-    }
+    const url = API_BASE + '/api/admin/question-template?format=xlsx';
+    const headers = {};
+    if (state.authToken) headers['x-auth-token'] = state.authToken;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) { showToast('下载失败','error'); return; }
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = '新品题库导入模板.xlsx';
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+    showToast('Excel模板已下载，请用Excel/WPS打开编辑','success');
   } catch(e){ showToast('下载失败','error'); }
 }
 
@@ -1591,7 +1599,7 @@ function openImportProduct(){
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label">产品名称</label>
+          <label class="form-label">产品名称 *</label>
           <input class="form-input" id="npTitle" placeholder="如：诺瓦 COEX系列">
         </div>
         <div class="form-group">
@@ -1603,16 +1611,21 @@ function openImportProduct(){
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">题库JSON（粘贴JSON内容或上传文件）</label>
-          <textarea class="form-textarea" id="npJson" rows="12" placeholder='粘贴JSON数组，格式：[{"type":"single","question":"题目","options":["A.xx","B.xx"],"answer":"A","points":5}]'></textarea>
+          <label class="form-label">上传Excel题库文件（.xlsx）*</label>
+          <div style="margin-top:6px">
+            <input type="file" id="npFile" accept=".xlsx,.xls" onchange="APP.handleNpFile(this)" style="display:block;width:100%;padding:8px;border:2px dashed #cbd5e1;border-radius:8px;cursor:pointer">
+          </div>
+          <div id="npFileInfo" style="margin-top:8px;font-size:12px;color:#64748b;display:none"></div>
         </div>
-        <div style="margin-bottom:12px">
-          <input type="file" id="npFile" accept=".json" onchange="APP.handleNpFile(this)">
+        <div style="border-top:1px solid #e2e8f0;margin:16px 0;padding-top:12px">
+          <label class="form-label" style="color:#64748b">或者粘贴JSON数据（兼容旧格式）</label>
+          <textarea class="form-textarea" id="npJson" rows="6" placeholder='粘贴JSON数组，格式：[{"type":"single","question":"题目","options":["A.xx","B.xx"],"answer":"A","points":5}]' style="margin-top:6px;font-size:12px"></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
-        <button class="btn btn-primary" id="npImportBtn" onclick="APP.importNewProduct()">导入</button>
+        <button class="btn btn-outline" onclick="APP.downloadTemplate()" style="margin-right:8px">下载模板</button>
+        <button class="btn btn-primary" id="npImportBtn" onclick="APP.importNewProduct()">导入生成考核</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1621,37 +1634,84 @@ function openImportProduct(){
 function handleNpFile(input){
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(e){
-    try {
-      const data = JSON.parse(e.target.result);
-      let questions;
-      if (Array.isArray(data)) questions = data;
-      else if (data.questions && Array.isArray(data.questions)) questions = data.questions;
-      else { showToast('JSON格式不正确','error'); return; }
-      const el = $('#npJson');
-      if (el) el.value = JSON.stringify(questions, null, 2);
-      if (data.title && !$('#npTitle').value) $('#npTitle').value = data.title;
-      if (data.brand) $('#npBrand').value = data.brand;
-    } catch(e){ showToast('文件解析失败，请检查JSON格式','error'); }
-  };
-  reader.readAsText(file);
+  const infoEl = $('#npFileInfo');
+  
+  // 判断文件类型
+  const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+  const isJson = file.name.endsWith('.json');
+  
+  if (isExcel) {
+    // Excel 文件：直接显示文件信息，等待提交时上传
+    if (infoEl) {
+      infoEl.innerHTML = `已选择：<strong>${escapeHtml(file.name)}</strong>（${(file.size/1024).toFixed(1)} KB）`;
+      infoEl.style.display = 'block';
+    }
+    // 清空 JSON 文本框
+    const jsonEl = $('#npJson');
+    if (jsonEl) jsonEl.value = '';
+    return;
+  }
+  
+  if (isJson) {
+    const reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        const data = JSON.parse(e.target.result);
+        let questions;
+        if (Array.isArray(data)) questions = data;
+        else if (data.questions && Array.isArray(data.questions)) questions = data.questions;
+        else { showToast('JSON格式不正确','error'); return; }
+        const el = $('#npJson');
+        if (el) el.value = JSON.stringify(questions, null, 2);
+        if (data.title && !$('#npTitle').value) $('#npTitle').value = data.title;
+        if (data.brand) $('#npBrand').value = data.brand;
+        if (infoEl) { infoEl.style.display = 'none'; }
+      } catch(e){ showToast('文件解析失败，请检查JSON格式','error'); }
+    };
+    reader.readAsText(file);
+    return;
+  }
+  
+  showToast('请上传 .xlsx 或 .json 格式的文件','error');
 }
 
 async function importNewProduct(){
   const title = $('#npTitle').value.trim();
   const brand = $('#npBrand').value;
+  const fileInput = $('#npFile');
   const jsonStr = $('#npJson').value.trim();
+  
   if (!title){ showToast('请输入产品名称','error'); return; }
-  if (!jsonStr){ showToast('请输入题库JSON','error'); return; }
-  let questions;
-  try { questions = JSON.parse(jsonStr); } catch(e){ showToast('JSON格式错误','error'); return; }
-  if (!Array.isArray(questions) || questions.length === 0){ showToast('题目列表不能为空','error'); return; }
-
+  
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  const isExcel = file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'));
+  
+  if (!isExcel && !jsonStr){ showToast('请上传Excel文件或粘贴JSON数据','error'); return; }
+  
   try {
-    const res = await api('/api/admin/new-products', {
-      method:'POST', body:JSON.stringify({ title, brand, questions })
-    });
+    let res;
+    if (isExcel) {
+      // Excel 文件上传
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', title);
+      formData.append('brand', brand);
+      const headers = {};
+      if (state.authToken) headers['x-auth-token'] = state.authToken;
+      const resp = await fetch(API_BASE + '/api/admin/new-products/import', {
+        method: 'POST', headers, body: formData
+      });
+      res = await resp.json();
+    } else {
+      // JSON 导入
+      let questions;
+      try { questions = JSON.parse(jsonStr); } catch(e){ showToast('JSON格式错误','error'); return; }
+      if (!Array.isArray(questions) || questions.length === 0){ showToast('题目列表不能为空','error'); return; }
+      res = await api('/api/admin/new-products/import', {
+        method:'POST', body:JSON.stringify({ title, brand, jsonData: jsonStr })
+      });
+    }
+    
     if (res.success){
       showToast(`新品"${title}"创建成功！${res.questionCount}道题`,'success');
       document.querySelector('.modal-overlay')?.remove();
