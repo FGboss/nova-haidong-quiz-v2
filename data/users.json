@@ -7,14 +7,6 @@
     "createdAt": "2026-08-13T11:04:14.752Z",
     "token": "tk_0d2554b414eecd102850c0251dfc4fb016460367f86516af"
   },
-  "student01": {
-    "username": "student01",
-    "name": "李学员",
-    "password": "c079b93d71c13c8b44e0d8e55abbdf1fe006e01f67a8b95c45500fb0df3598f8",
-    "role": "student",
-    "token": "tk_31391b0f3c00ca251b1c244ab287318b74a22cbfb8501aa2",
-    "createdAt": "2026-08-13T12:12:35.472Z"
-  },
   "李雯锋": {
     "username": "李雯锋",
     "name": "李雯锋",
