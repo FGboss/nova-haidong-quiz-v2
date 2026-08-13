@@ -1398,3 +1398,4 @@ app.listen(PORT, () => {
     try { totalQ += loadQuestions(exam.questionFile).length; } catch(e) {}
   }
   console.log(`[server] Total questions loaded: ${totalQ}`);
+});
