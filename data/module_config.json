@@ -36,5 +36,13 @@
       "bankIds": []
     }
   },
-  "customModules": {}
+  "customModules": {
+    "custom_1786633611899": {
+      "id": "custom_1786633611899",
+      "name": "测试自定义模块",
+      "icon": "🧪",
+      "desc": "用于测试的模块",
+      "bankIds": []
+    }
+  }
 }
