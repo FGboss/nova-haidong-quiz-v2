@@ -532,7 +532,7 @@ function renderResult(app) {
     </div>
     <div class="container">
       <div class="score-display">
-        <div class="score-number ${passed ? 'score-pass' : 'score-fail'}">${score}</div>
+        <div class="score-number ${passed ? 'score-pass' : 'score-fail'}">${score}<span style="font-size:24px;font-weight:500;opacity:0.6"> / 100</span></div>
         <div class="score-label">最终得分</div>
         <div class="score-status ${passed ? 'score-pass' : 'score-fail'}">${passed ? '🎉 恭喜通过！' : '继续加油！'}</div>
         <div style="font-size:13px;color:var(--text-sec);margin-top:4px">第${record.attemptNumber}次答题 · 剩余${state.remainingAttempts}次机会</div>
