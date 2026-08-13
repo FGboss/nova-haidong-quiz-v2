@@ -813,6 +813,16 @@ app.get('/api/mentor/records/export', mentorAuth, (req, res) => {
   res.send('\uFEFF' + csv);
 });
 
+// 学生查看自己的答题记录
+app.get('/api/student/records', authMiddleware, (req, res) => {
+  const records = readJSON('records.json');
+  const studentName = req.currentUser.name;
+  const filtered = records.filter(r => r.studentName === studentName);
+  // 按时间倒序
+  filtered.sort((a, b) => new Date(b.submitTime || 0).getTime() - new Date(a.submitTime || 0).getTime());
+  res.json({ success: true, records: filtered, total: filtered.length });
+});
+
 app.get('/api/mentor/records/:id', mentorAuth, (req, res) => {
   const records = readJSON('records.json');
   const record = records.find(r => r.id === req.params.id);
