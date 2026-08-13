@@ -81,33 +81,13 @@ function gitPersist() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistPending = false;
-    let saved = false;
-    // 先尝试 GitHub API 持久化
+    // 仅使用 GitHub API 持久化数据，不触发 git push（避免频繁触发 Render 部署）
     ghApiPersist().then(() => {
-      saved = true;
       console.log('[persist] GitHub API persist OK');
     }).catch(e => {
       console.error('[persist] GitHub API persist failed:', e.message);
-    }).finally(() => {
-      // 再尝试 Git push
-      try {
-        const gitDir = path.join(__dirname, '.git');
-        if (fs.existsSync(gitDir)) {
-          try {
-            execSync('git add data/', { cwd: __dirname, stdio: 'pipe', timeout: 10000 });
-          } catch(e) { /* git add 失败不致命 */ }
-          try {
-            const diff = execSync('git diff --cached --name-only', { cwd: __dirname, stdio: 'pipe', timeout: 5000 }).toString().trim();
-            if (diff) {
-              try { execSync('git commit -m "data: auto-persist"', { cwd: __dirname, stdio: 'pipe', timeout: 10000 }); } catch(e) {}
-              try { execSync('git push origin master', { cwd: __dirname, stdio: 'pipe', timeout: 15000 }); console.log('[persist] Git push OK'); saved = true; } catch(e) { console.log('[persist] Git push failed:', e.message); }
-            }
-          } catch(e) { /* diff 失败不致命 */ }
-        }
-      } catch(e) { console.log('[persist] Git operations failed:', e.message); }
-      if (!saved) console.error('[persist] CRITICAL: All persistence methods failed!');
     });
-  }, 2000);
+  }, 5000);
 }
 
 async function ghApiPersist() {
