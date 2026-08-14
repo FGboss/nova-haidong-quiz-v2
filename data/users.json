@@ -5,7 +5,23 @@
     "role": "admin",
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
-    "token": "tk_0d2554b414eecd102850c0251dfc4fb016460367f86516af"
+    "token": "tk_297195275b4907b14788bcf8545ac85ee4c64cbb9a032257"
+  },
+  "mentor01": {
+    "username": "mentor01",
+    "name": "张导师",
+    "password": "236977126d6375b9fa5f7ec7d7d7055cf36741c990d9c788f68a8427b08cdf08",
+    "role": "mentor",
+    "createdAt": "2026-08-13T12:11:38.781Z",
+    "token": "tk_e7ba45b85da6beca64d3cdd38def8ff2c84ba9506b55b79e"
+  },
+  "student01": {
+    "username": "student01",
+    "name": "李学员",
+    "password": "c079b93d71c13c8b44e0d8e55abbdf1fe006e01f67a8b95c45500fb0df3598f8",
+    "role": "student",
+    "token": "tk_31391b0f3c00ca251b1c244ab287318b74a22cbfb8501aa2",
+    "createdAt": "2026-08-13T12:12:35.472Z"
   },
   "李雯锋": {
     "username": "李雯锋",
@@ -13,20 +29,6 @@
     "password": "37dc42144060b12ae66e899d40abfa204b4bcfd34d98acdcf6f1177d1cddaead",
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
-    "token": "tk_783cde537440a57e96a16e40e3433bc5f06e35861b0cb20c"
-  },
-  "苏永林": {
-    "username": "苏永林",
-    "name": "苏永林",
-    "password": "9583491489fba35a1c679ad4673343ebd9ca9e61734e1176c51afefc6cad40ea",
-    "role": "mentor",
-    "createdAt": "2026-08-13T15:36:28.905Z"
-  },
-  "邱洁标": {
-    "username": "邱洁标",
-    "name": "邱洁标",
-    "password": "bb6d497849c8370605b80ff4cccb399b27a591b4d4b274a12a3ad4556dad03e5",
-    "role": "mentor",
-    "createdAt": "2026-08-13T15:40:38.325Z"
+    "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
   }
 }
