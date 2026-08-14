@@ -30,5 +30,13 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
     "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
+  },
+  "prank": {
+    "username": "prank",
+    "name": "李明锋",
+    "password": "af565cd91d6e2648c79abf8186638ddc2a25127de5c1b4b85cef462c85709dc1",
+    "role": "student",
+    "token": "tk_305c56b43f45770c42e94db326dfc98df703b831f95228f2",
+    "createdAt": "2026-08-14T03:07:31.357Z"
   }
 }
