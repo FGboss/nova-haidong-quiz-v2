@@ -5,7 +5,7 @@
     "role": "admin",
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
-    "token": "tk_92839760a2a33a9abff01ee62a1404df98526365c88659a3"
+    "token": "tk_297195275b4907b14788bcf8545ac85ee4c64cbb9a032257"
   },
   "mentor01": {
     "username": "mentor01",
@@ -30,37 +30,5 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
     "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
-  },
-  "苏永林": {
-    "username": "苏永林",
-    "name": "苏永林",
-    "password": "9583491489fba35a1c679ad4673343ebd9ca9e61734e1176c51afefc6cad40ea",
-    "role": "mentor",
-    "createdAt": "2026-08-17T05:48:23.724Z",
-    "token": "tk_f98e24a23e5c5bdbe53d9193a467635d633645142a603f2b"
-  },
-  "lwf": {
-    "username": "lwf",
-    "name": "李雯锋",
-    "password": "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f",
-    "role": "student",
-    "token": "tk_48d7d1c1b207f9510b27444b7b8a70d44d0ac2b7042a98b2",
-    "createdAt": "2026-08-17T05:49:07.437Z"
-  },
-  "Mark": {
-    "username": "Mark",
-    "name": "苏永林",
-    "password": "557173eb092f0807437a9771e5b7874370a9b2e5c7a64428fffbc38ddd9c28f0",
-    "role": "student",
-    "token": "tk_e263285de8e64bb452e03946dcc093c494c6772088b9178f",
-    "createdAt": "2026-08-17T05:53:18.607Z"
-  },
-  "prank": {
-    "username": "prank",
-    "name": "李明锋",
-    "password": "af565cd91d6e2648c79abf8186638ddc2a25127de5c1b4b85cef462c85709dc1",
-    "role": "student",
-    "token": "tk_7a359af11fc83ea3eec739311ce3ba3760c9d395f1d8a685",
-    "createdAt": "2026-08-17T05:57:46.616Z"
   }
 }
