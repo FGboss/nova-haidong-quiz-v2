@@ -1276,7 +1276,7 @@
     "timeSpent": 57,
     "id": "r_1786971148900_i93esi",
     "autoScore": 36,
-    "finalScore": 36,
+    "finalScore": 47,
     "passed": false,
     "questionScores": {
       "w1d1_q3": {
@@ -1352,11 +1352,11 @@
         "maxScore": 5
       },
       "w1d1_q18": {
-        "score": 0,
+        "score": 7,
         "maxScore": 10
       },
       "w1d1_q17": {
-        "score": 0,
+        "score": 4,
         "maxScore": 4
       }
     },
@@ -1374,10 +1374,21 @@
         "max": 20
       },
       "short": {
-        "score": 0,
+        "score": 11,
         "max": 14
       }
     },
-    "mentorScored": false
+    "mentorScored": true,
+    "mentorScore": 11,
+    "mentorScoreDetails": {
+      "w1d1_q18": {
+        "autoScore": 0,
+        "mentorScore": 7
+      },
+      "w1d1_q17": {
+        "autoScore": 0,
+        "mentorScore": 4
+      }
+    }
   }
 ]
