@@ -49,223 +49,229 @@ const GH_REPO = process.env.GH_REPO || 'FGboss/nova-haidong-quiz-v2';
 
 const TYPE_ORDER = ['single', 'multiple', 'judge', 'short'];
 
-// ===== 数据读写 =====
+// ===== 数据读写（含本地备份） =====
 function readJSON(filename) {
   const p = path.join(DATA_DIR, filename);
-  if (!fs.existsSync(p)) return [];
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e) { return []; }
+  if (!fs.existsSync(p)) {
+    // 尝试从备份恢复
+    const bak = p + '.bak';
+    if (fs.existsSync(bak)) {
+      try { return JSON.parse(fs.readFileSync(bak, 'utf8')); } catch(e) {}
+    }
+    return [];
+  }
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e) {
+    const bak = p + '.bak';
+    if (fs.existsSync(bak)) {
+      try { return JSON.parse(fs.readFileSync(bak, 'utf8')); } catch(e2) {}
+    }
+    return [];
+  }
 }
 function writeJSON(filename, data) {
-  fs.writeFileSync(path.join(DATA_DIR, filename), JSON.stringify(data, null, 2));
+  const p = path.join(DATA_DIR, filename);
+  const json = JSON.stringify(data, null, 2);
+  fs.writeFileSync(p, json);
+  // 写入本地备份
+  fs.writeFileSync(p + '.bak', json);
   gitPersist();
 }
 function readObj(filename) {
   const p = path.join(DATA_DIR, filename);
-  if (!fs.existsSync(p)) return {};
+  if (!fs.existsSync(p)) {
+    const bak = p + '.bak';
+    if (fs.existsSync(bak)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(bak, 'utf8'));
+        return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+      } catch(e) {}
+    }
+    return {};
+  }
   try {
     const data = JSON.parse(fs.readFileSync(p, 'utf8'));
     return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
-  } catch(e) { return {}; }
+  } catch(e) {
+    const bak = p + '.bak';
+    if (fs.existsSync(bak)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(bak, 'utf8'));
+        return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+      } catch(e2) {}
+    }
+    return {};
+  }
 }
 function writeObj(filename, data) {
-  fs.writeFileSync(path.join(DATA_DIR, filename), JSON.stringify(data, null, 2));
+  const p = path.join(DATA_DIR, filename);
+  const json = JSON.stringify(data, null, 2);
+  fs.writeFileSync(p, json);
+  fs.writeFileSync(p + '.bak', json);
   gitPersist();
 }
 
-// ===== Git 持久化 =====
-let persistPending = false;
+// ===== GitHub 持久化（无防抖，立即排队） =====
+let persistQueue = new Set();
+let persistRunning = false;
 let persistTimer = null;
 
 function gitPersist() {
-  if (persistPending) return;
-  persistPending = true;
+  // 标记所有 JSON 文件为待同步
+  const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+  for (const f of dataFiles) persistQueue.add(f);
+  // 延迟 50ms 合并连续写入，但不超过 50ms
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    persistPending = false;
-    ghApiPersist().then(() => {
-      console.log('[persist] GitHub API persist OK');
-    }).catch(e => {
-      console.error('[persist] GitHub API persist failed:', e.message);
-    });
-  }, 1000); // 1秒防抖，减少数据丢失窗口
+  persistTimer = setTimeout(runPersist, 50);
 }
 
-async function ghApiPersist() {
-  const https = require('https');
-  const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+async function runPersist() {
+  if (persistRunning) return;
+  persistRunning = true;
+  const files = [...persistQueue];
+  persistQueue.clear();
+
   const MAX_RETRIES = 3;
 
-  for (const f of dataFiles) {
+  for (const f of files) {
     const p = path.join(DATA_DIR, f);
     if (!fs.existsSync(p)) continue;
     const content = fs.readFileSync(p, 'utf8');
     const localContentBase64 = Buffer.from(content).toString('base64');
 
-    // Get SHA and check if file has changed
-    let remoteSha = null;
-    let remoteContent = null;
+    // 获取远程 SHA 检查是否变更
+    let remoteSha = '';
     let hasChanged = true;
-
     try {
-      const getResult = await new Promise((resolve) => {
-        const req = https.get({
-          hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`,
-          headers: { 'User-Agent': 'NovaQuizV3/1.0', 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' }
-        }, (res) => {
-          let b = '';
-          res.on('data', d => b += d);
-          res.on('end', () => {
-            try {
-              const data = JSON.parse(b);
-              if (res.statusCode === 200 && data.sha) {
-                resolve({ sha: data.sha, content: data.content || null });
-              } else {
-                resolve({ sha: null, content: null });
-              }
-            } catch(e) { resolve({ sha: null, content: null }); }
-          });
-        });
-        req.on('error', () => resolve({ sha: null, content: null }));
-        req.setTimeout(10000, () => { req.destroy(); resolve({ sha: null, content: null }); });
-      });
-
-      remoteSha = getResult.sha;
-      remoteContent = getResult.content;
-
-      // Check if local content matches remote (skip if unchanged)
-      if (remoteSha && remoteContent && remoteContent.replace(/\s/g, '') === localContentBase64.replace(/\s/g, '')) {
-        hasChanged = false;
+      const shaResult = execSync(
+        `curl -s --connect-timeout 5 --max-time 10 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+        { timeout: 15000, stdio: 'pipe' }
+      ).toString();
+      const shaData = JSON.parse(shaResult);
+      if (shaData.sha) {
+        remoteSha = shaData.sha;
+        if (shaData.content && shaData.content.replace(/\s/g, '') === localContentBase64.replace(/\s/g, '')) {
+          hasChanged = false;
+        }
       }
-    } catch(e) {
-      hasChanged = true;
-    }
+    } catch(e) { hasChanged = true; }
 
-    if (!hasChanged) {
-      console.log(`[persist] GitHub API: data/${f} → SKIPPED (unchanged)`);
-      continue;
-    }
+    if (!hasChanged) continue;
 
-    // Retry logic for PUT
+    // 用 curl 执行 PUT（比 Node.js https 模块更可靠，自动处理代理）
     const body = JSON.stringify({
       message: 'data: auto-persist',
       content: localContentBase64,
       ...(remoteSha ? { sha: remoteSha } : {})
     });
+    const tmpFile = `/tmp/persist_${f}_${Date.now()}.json`;
+    fs.writeFileSync(tmpFile, body);
 
     let success = false;
     for (let attempt = 0; attempt < MAX_RETRIES && !success; attempt++) {
-      if (attempt > 0) {
-        const delay = Math.pow(2, attempt) * 1000;
-        await new Promise(r => setTimeout(r, delay));
-      }
-
-      const putResult = await new Promise((resolve) => {
-        const req = https.request({
-          hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`, method: 'PUT',
-          headers: {
-            'User-Agent': 'NovaQuizV3/1.0',
-            'Authorization': `token ${GH_TOKEN}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(body)
-          }
-        }, (res) => {
-          let b = '';
-          res.on('data', d => b += d);
-          res.on('end', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              resolve({ success: true, statusCode: res.statusCode });
-            } else {
-              resolve({ success: false, statusCode: res.statusCode, body: b });
-            }
-          });
-        });
-        req.on('error', (e) => resolve({ success: false, statusCode: 0, body: e.message }));
-        req.setTimeout(15000, () => { req.destroy(); resolve({ success: false, statusCode: 0, body: 'timeout' }); });
-        req.write(body);
-        req.end();
-      });
-
-      if (putResult.success) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+      try {
+        execSync(
+          `curl -s --connect-timeout 5 --max-time 15 -X PUT -H "Authorization: token ${GH_TOKEN}" -H "Content-Type: application/json" -d @${tmpFile} https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+          { timeout: 20000, stdio: 'pipe' }
+        );
         success = true;
-        console.log(`[persist] GitHub API: data/${f} → HTTP ${putResult.statusCode}`);
-      } else {
-        console.error(`[persist] ${f}: attempt ${attempt + 1}/${MAX_RETRIES} failed (HTTP ${putResult.statusCode}): ${putResult.body}`);
+        console.log(`[persist] ${f} → OK`);
+      } catch(e) {
+        console.error(`[persist] ${f}: attempt ${attempt + 1}/${MAX_RETRIES} failed (${(e.message || '').slice(0, 60)})`);
       }
     }
-
-    if (!success) {
-      console.error(`[persist] ${f}: all ${MAX_RETRIES} attempts failed`);
-    }
+    try { fs.unlinkSync(tmpFile); } catch(e) {}
+    if (!success) console.error(`[persist] ${f}: ALL ${MAX_RETRIES} attempts failed — data only in local + backup`);
   }
+  persistRunning = false;
 }
 
-// ===== 启动时数据恢复：统一从 GitHub API 拉取最新数据 =====
-// 注意：不再使用 git checkout，因为 git 仓库里的数据是旧的，
-// 而运行时数据通过 GitHub API 写入，两者不同步会导致数据被旧版本覆盖。
+// ===== 启动时数据恢复：从 GitHub API 拉取最新数据（含重试） =====
 let dataRestoredFromRemote = false;
 function setupGit() {
-  let anyRestored = false;
   const filesToRestore = ['records.json', 'users.json', 'mentors.json', 'module_config.json', 'new_product_meta.json', 'plan.json', 'question_overrides.json'];
+  const MAX_STARTUP_RETRIES = 3;
+  let anyRestored = false;
 
   for (const f of filesToRestore) {
     const localPath = path.join(DATA_DIR, f);
-    try {
-      const content = execSync(
-        `curl -s --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
-        { timeout: 20000, stdio: 'pipe' }
-      ).toString();
+    let restored = false;
 
-      if (!content || content.length < 10) continue;
+    for (let retry = 0; retry < MAX_STARTUP_RETRIES && !restored; retry++) {
+      if (retry > 0) {
+        const delay = Math.pow(2, retry) * 1000;
+        console.log(`[setup] Retry ${retry}/${MAX_STARTUP_RETRIES} for ${f} in ${delay}ms...`);
+        execSync(`sleep ${delay / 1000}`, { stdio: 'pipe', timeout: delay + 2000 });
+      }
 
       try {
-        const parsed = JSON.parse(content);
+        const content = execSync(
+          `curl -s --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+          { timeout: 20000, stdio: 'pipe' }
+        ).toString();
 
-        // 检测是否为 GitHub API 错误响应（有 message 和 documentation_url 字段）
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          if (parsed.message && parsed.documentation_url) {
-            console.log('[setup] GitHub API error for ' + f + ': ' + parsed.message);
-            continue;
+        if (!content || content.length < 10) continue;
+
+        try {
+          const parsed = JSON.parse(content);
+
+          // 检测 GitHub API 错误响应
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            if (parsed.message && parsed.documentation_url) {
+              console.log(`[setup] ${f}: GitHub API error (${parsed.message})`);
+              continue;
+            }
+          }
+
+          let localData = null;
+          if (fs.existsSync(localPath)) {
+            try { localData = JSON.parse(fs.readFileSync(localPath, 'utf8')); } catch(e) {}
+          }
+
+          const remoteSize = Array.isArray(parsed) ? parsed.length : Object.keys(parsed).length;
+          const localSize = localData ? (Array.isArray(localData) ? localData.length : Object.keys(localData).length) : 0;
+
+          if (!localData || remoteSize >= localSize) {
+            fs.writeFileSync(localPath, content);
+            console.log(`[setup] Restored ${f} (remote=${remoteSize} local=${localSize})`);
+            anyRestored = true;
+            dataRestoredFromRemote = true;
+            restored = true;
+          } else {
+            console.log(`[setup] Kept local ${f} (local=${localSize} > remote=${remoteSize})`);
+            anyRestored = true;
+            restored = true;
+          }
+        } catch(parseErr) {
+          if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 10) {
+            fs.writeFileSync(localPath, content);
+            console.log(`[setup] Restored ${f} (fallback)`);
+            anyRestored = true;
+            restored = true;
           }
         }
-
-        // 合法数据（对象或数组），恢复它
-        let localData = null;
-        if (fs.existsSync(localPath)) {
-          try { localData = JSON.parse(fs.readFileSync(localPath, 'utf8')); } catch(e) {}
-        }
-
-        const remoteSize = Array.isArray(parsed) ? parsed.length : Object.keys(parsed).length;
-        const localSize = localData ? (Array.isArray(localData) ? localData.length : Object.keys(localData).length) : 0;
-
-        // 远程数据量 >= 本地，用远程覆盖本地（远程是权威数据源）
-        if (!localData || remoteSize >= localSize) {
-          fs.writeFileSync(localPath, content);
-          console.log('[setup] Restored ' + f + ' via GitHub API (remote=' + remoteSize + ' local=' + localSize + ')');
-          anyRestored = true;
-          dataRestoredFromRemote = true;
-        } else {
-          // 本地数据更多（可能是上次运行写入但未成功同步到远程的），保留本地
-          console.log('[setup] Kept local ' + f + ' (local=' + localSize + ' > remote=' + remoteSize + ')');
-          anyRestored = true;
-        }
-      } catch(parseErr) {
-        // 解析失败也写入，至少比本地空文件好
-        if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 10) {
-          fs.writeFileSync(localPath, content);
-          console.log('[setup] Restored ' + f + ' via GitHub API (fallback)');
-          anyRestored = true;
-        }
+      } catch(e3) {
+        console.log(`[setup] ${f} attempt ${retry + 1} failed: ${(e3.message || 'network error').slice(0, 80)}`);
       }
-    } catch(e3) {
-      console.log('[setup] Failed to restore ' + f + ': ' + (e3.message || 'network error'));
+    }
+    if (!restored) console.log(`[setup] ${f}: ALL ${MAX_STARTUP_RETRIES} attempts failed`);
+  }
+
+  // 如果 GitHub API 恢复部分失败，尝试从本地 .bak 文件恢复
+  if (!anyRestored) {
+    console.log('[setup] GitHub API restore failed, trying local backups...');
+    for (const f of filesToRestore) {
+      const localPath = path.join(DATA_DIR, f);
+      const bakPath = localPath + '.bak';
+      if (!fs.existsSync(localPath) && fs.existsSync(bakPath)) {
+        fs.copyFileSync(bakPath, localPath);
+        console.log(`[setup] Restored ${f} from local backup`);
+        anyRestored = true;
+      }
     }
   }
 
-  if (!anyRestored) {
-    console.log('[setup] No remote data restored, using local data only.');
-  }
-  console.log('[setup] Data restore complete. ' + (dataRestoredFromRemote ? 'Remote data available.' : 'Local-only mode.'));
+  console.log(`[setup] Data restore complete. Remote=${dataRestoredFromRemote}, Files=${anyRestored ? 'OK' : 'NONE'}`);
 }
 setupGit();
 
@@ -1523,11 +1529,13 @@ async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[server] ${signal} received, flushing data to GitHub...`);
+  clearTimeout(persistTimer);
   try {
-    // 立即执行一次持久化（跳过 debounce）
-    persistPending = false;
-    clearTimeout(persistTimer);
-    await ghApiPersist();
+    // 强制标记所有文件为待同步并立即执行
+    const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+    for (const f of dataFiles) persistQueue.add(f);
+    persistRunning = false;
+    await runPersist();
     console.log('[server] Data flushed successfully.');
   } catch(e) {
     console.error('[server] Flush failed:', e.message);
@@ -1536,6 +1544,13 @@ async function gracefulShutdown(signal) {
 }
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ===== 定期同步：每 30 秒确保数据已同步到 GitHub =====
+setInterval(() => {
+  const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+  for (const f of dataFiles) persistQueue.add(f);
+  runPersist().catch(e => console.error('[sync] Periodic sync failed:', e.message));
+}, 30000);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
