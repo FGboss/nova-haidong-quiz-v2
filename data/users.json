@@ -21,5 +21,13 @@
     "password": "9583491489fba35a1c679ad4673343ebd9ca9e61734e1176c51afefc6cad40ea",
     "role": "mentor",
     "createdAt": "2026-08-17T08:23:07.465Z"
+  },
+  "lwf": {
+    "username": "lwf",
+    "name": "李雯锋",
+    "password": "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f",
+    "role": "student",
+    "token": "tk_d90d35f0b6c1c8a4986f59bd1335c6f73b0249602fbb24c3",
+    "createdAt": "2026-08-17T08:23:27.111Z"
   }
 }
