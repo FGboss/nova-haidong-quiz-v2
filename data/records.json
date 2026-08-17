@@ -909,19 +909,5 @@
       }
     },
     "mentorScored": false
-  },
-  {
-    "id": "r_verify_1786967552273",
-    "studentName": "验证学员_msx6cbv5",
-    "examId": "w1d1",
-    "autoScore": 100,
-    "finalScore": 100,
-    "passed": true,
-    "submitTime": "2026-08-17T11:52:32.274Z",
-    "questions": [],
-    "answers": {},
-    "questionScores": {},
-    "typeScores": {},
-    "mentorScored": false
   }
 ]
