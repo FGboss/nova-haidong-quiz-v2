@@ -82,77 +82,190 @@ function gitPersist() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistPending = false;
-    // 仅使用 GitHub API 持久化数据，不触发 git push（避免频繁触发 Render 部署）
     ghApiPersist().then(() => {
       console.log('[persist] GitHub API persist OK');
     }).catch(e => {
       console.error('[persist] GitHub API persist failed:', e.message);
     });
-  }, 5000);
+  }, 1000); // 1秒防抖，减少数据丢失窗口
 }
 
 async function ghApiPersist() {
   const https = require('https');
   const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+  const MAX_RETRIES = 3;
+
   for (const f of dataFiles) {
     const p = path.join(DATA_DIR, f);
     if (!fs.existsSync(p)) continue;
     const content = fs.readFileSync(p, 'utf8');
-    const sha = await new Promise((resolve) => {
-      const req = https.get({
-        hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`,
-        headers: { 'User-Agent': 'NovaQuizV3/1.0', 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' }
-      }, (res) => { let b = ''; res.on('data', d => b += d); res.on('end', () => { try { resolve(JSON.parse(b).sha || null); } catch(e) { resolve(null); } }); });
-      req.on('error', () => resolve(null));
+    const localContentBase64 = Buffer.from(content).toString('base64');
+
+    // Get SHA and check if file has changed
+    let remoteSha = null;
+    let remoteContent = null;
+    let hasChanged = true;
+
+    try {
+      const getResult = await new Promise((resolve) => {
+        const req = https.get({
+          hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`,
+          headers: { 'User-Agent': 'NovaQuizV3/1.0', 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' }
+        }, (res) => {
+          let b = '';
+          res.on('data', d => b += d);
+          res.on('end', () => {
+            try {
+              const data = JSON.parse(b);
+              if (res.statusCode === 200 && data.sha) {
+                resolve({ sha: data.sha, content: data.content || null });
+              } else {
+                resolve({ sha: null, content: null });
+              }
+            } catch(e) { resolve({ sha: null, content: null }); }
+          });
+        });
+        req.on('error', () => resolve({ sha: null, content: null }));
+        req.setTimeout(10000, () => { req.destroy(); resolve({ sha: null, content: null }); });
+      });
+
+      remoteSha = getResult.sha;
+      remoteContent = getResult.content;
+
+      // Check if local content matches remote (skip if unchanged)
+      if (remoteSha && remoteContent && remoteContent.replace(/\s/g, '') === localContentBase64.replace(/\s/g, '')) {
+        hasChanged = false;
+      }
+    } catch(e) {
+      hasChanged = true;
+    }
+
+    if (!hasChanged) {
+      console.log(`[persist] GitHub API: data/${f} → SKIPPED (unchanged)`);
+      continue;
+    }
+
+    // Retry logic for PUT
+    const body = JSON.stringify({
+      message: 'data: auto-persist',
+      content: localContentBase64,
+      ...(remoteSha ? { sha: remoteSha } : {})
     });
-    const body = JSON.stringify({ message: 'data: auto-persist', content: Buffer.from(content).toString('base64'), ...(sha ? { sha } : {}) });
-    await new Promise((resolve) => {
-      const req = https.request({
-        hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`, method: 'PUT',
-        headers: { 'User-Agent': 'NovaQuizV3/1.0', 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-      }, (res) => { console.log(`[persist] GitHub API: data/${f} → HTTP ${res.statusCode}`); resolve(); });
-      req.on('error', (e) => { console.error(`[persist] ${f}: ${e.message}`); resolve(); });
-      req.write(body); req.end();
-    });
+
+    let success = false;
+    for (let attempt = 0; attempt < MAX_RETRIES && !success; attempt++) {
+      if (attempt > 0) {
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise(r => setTimeout(r, delay));
+      }
+
+      const putResult = await new Promise((resolve) => {
+        const req = https.request({
+          hostname: 'api.github.com', path: `/repos/${GH_REPO}/contents/data/${f}`, method: 'PUT',
+          headers: {
+            'User-Agent': 'NovaQuizV3/1.0',
+            'Authorization': `token ${GH_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body)
+          }
+        }, (res) => {
+          let b = '';
+          res.on('data', d => b += d);
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve({ success: true, statusCode: res.statusCode });
+            } else {
+              resolve({ success: false, statusCode: res.statusCode, body: b });
+            }
+          });
+        });
+        req.on('error', (e) => resolve({ success: false, statusCode: 0, body: e.message }));
+        req.setTimeout(15000, () => { req.destroy(); resolve({ success: false, statusCode: 0, body: 'timeout' }); });
+        req.write(body);
+        req.end();
+      });
+
+      if (putResult.success) {
+        success = true;
+        console.log(`[persist] GitHub API: data/${f} → HTTP ${putResult.statusCode}`);
+      } else {
+        console.error(`[persist] ${f}: attempt ${attempt + 1}/${MAX_RETRIES} failed (HTTP ${putResult.statusCode}): ${putResult.body}`);
+      }
+    }
+
+    if (!success) {
+      console.error(`[persist] ${f}: all ${MAX_RETRIES} attempts failed`);
+    }
   }
 }
 
-// ===== 启动时数据恢复（同步安全版） =====
+// ===== 启动时数据恢复：统一从 GitHub API 拉取最新数据 =====
+// 注意：不再使用 git checkout，因为 git 仓库里的数据是旧的，
+// 而运行时数据通过 GitHub API 写入，两者不同步会导致数据被旧版本覆盖。
+let dataRestoredFromRemote = false;
 function setupGit() {
-  let dataRestored = false;
-  try {
-    const gitDir = path.join(__dirname, '.git');
-    if (fs.existsSync(gitDir)) {
-      try {
-        execSync('git config user.email "quiz-bot@nova.com"', { cwd: __dirname, stdio: 'pipe', timeout: 5000 });
-        execSync('git config user.name "Nova Quiz Bot"', { cwd: __dirname, stdio: 'pipe', timeout: 5000 });
-      } catch(e) { /* non-critical */ }
-      try {
-        execSync('git fetch origin master 2>/dev/null', { cwd: __dirname, stdio: 'pipe', timeout: 15000 });
-        execSync('git checkout origin/master -- data/ 2>/dev/null', { cwd: __dirname, stdio: 'pipe', timeout: 10000 });
-        console.log('[setup] Data restored via git pull'); dataRestored = true;
-      } catch(e2) { console.log('[setup] Git pull failed (non-critical):', e2.message); }
-    }
-  } catch(e) { console.log('[setup] Git config skipped:', e.message); }
-  if (!dataRestored) {
+  let anyRestored = false;
+  const filesToRestore = ['records.json', 'users.json', 'mentors.json', 'module_config.json', 'new_product_meta.json', 'plan.json', 'question_overrides.json'];
+
+  for (const f of filesToRestore) {
+    const localPath = path.join(DATA_DIR, f);
     try {
-      const https = require('https');
-      const filesToRestore = ['records.json', 'users.json', 'mentors.json'];
-      for (const f of filesToRestore) {
-        const localPath = path.join(DATA_DIR, f);
-        if (fs.existsSync(localPath) && fs.statSync(localPath).size > 10) continue;
-        try {
-          const content = execSync(`curl -s -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`, { timeout: 10000, stdio: 'pipe' }).toString();
-          if (content && content.length > 10 && !content.startsWith('{')) {
-            fs.writeFileSync(localPath, content);
-            console.log('[setup] Restored ' + f + ' via GitHub API');
-            dataRestored = true;
+      const content = execSync(
+        `curl -s --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+        { timeout: 20000, stdio: 'pipe' }
+      ).toString();
+
+      if (!content || content.length < 10) continue;
+
+      try {
+        const parsed = JSON.parse(content);
+
+        // 检测是否为 GitHub API 错误响应（有 message 和 documentation_url 字段）
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          if (parsed.message && parsed.documentation_url) {
+            console.log('[setup] GitHub API error for ' + f + ': ' + parsed.message);
+            continue;
           }
-        } catch(e3) { /* skip */ }
+        }
+
+        // 合法数据（对象或数组），恢复它
+        let localData = null;
+        if (fs.existsSync(localPath)) {
+          try { localData = JSON.parse(fs.readFileSync(localPath, 'utf8')); } catch(e) {}
+        }
+
+        const remoteSize = Array.isArray(parsed) ? parsed.length : Object.keys(parsed).length;
+        const localSize = localData ? (Array.isArray(localData) ? localData.length : Object.keys(localData).length) : 0;
+
+        // 远程数据量 >= 本地，用远程覆盖本地（远程是权威数据源）
+        if (!localData || remoteSize >= localSize) {
+          fs.writeFileSync(localPath, content);
+          console.log('[setup] Restored ' + f + ' via GitHub API (remote=' + remoteSize + ' local=' + localSize + ')');
+          anyRestored = true;
+          dataRestoredFromRemote = true;
+        } else {
+          // 本地数据更多（可能是上次运行写入但未成功同步到远程的），保留本地
+          console.log('[setup] Kept local ' + f + ' (local=' + localSize + ' > remote=' + remoteSize + ')');
+          anyRestored = true;
+        }
+      } catch(parseErr) {
+        // 解析失败也写入，至少比本地空文件好
+        if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 10) {
+          fs.writeFileSync(localPath, content);
+          console.log('[setup] Restored ' + f + ' via GitHub API (fallback)');
+          anyRestored = true;
+        }
       }
-    } catch(e) { console.log('[setup] GitHub API restore failed:', e.message); }
+    } catch(e3) {
+      console.log('[setup] Failed to restore ' + f + ': ' + (e3.message || 'network error'));
+    }
   }
-  if (!dataRestored) console.log('[setup] Starting with fresh/local data.');
+
+  if (!anyRestored) {
+    console.log('[setup] No remote data restored, using local data only.');
+  }
+  console.log('[setup] Data restore complete. ' + (dataRestoredFromRemote ? 'Remote data available.' : 'Local-only mode.'));
 }
 setupGit();
 
@@ -167,7 +280,15 @@ function initSuperAdmin() {
       name: '超级管理员',
       createdAt: new Date().toISOString()
     };
-    writeObj('users.json', users);
+    if (dataRestoredFromRemote) {
+      // 远程数据已恢复，正常写入并触发持久化
+      writeObj('users.json', users);
+    } else {
+      // 远程数据未恢复，仅写入本地，不覆盖远程已有数据
+      fs.writeFileSync(path.join(DATA_DIR, 'users.json'), JSON.stringify(users, null, 2));
+      console.log('[init] Super admin initialized (local only, remote data preserved).');
+      return;
+    }
     console.log('[init] Super admin initialized.');
   }
 }
@@ -183,12 +304,20 @@ function initModuleConfig() {
     client: { id: 'client', name: '客户端考核', icon: '🏢', desc: '客户现场培训考核，按产品系列出题，模拟纸质试卷模式', bankIds: [] },
     new_product: { id: 'new_product', name: '新品考核', icon: '🆕', desc: '新品培训考核，持续更新中', bankIds: [] }
   };
-  if (!config.fixedModules) config.fixedModules = {};
+  let changed = false;
+  if (!config.fixedModules) { config.fixedModules = {}; changed = true; }
   for (const k of Object.keys(defaults)) {
-    if (!config.fixedModules[k]) config.fixedModules[k] = defaults[k];
+    if (!config.fixedModules[k]) { config.fixedModules[k] = defaults[k]; changed = true; }
   }
-  if (!config.customModules) config.customModules = {};
-  writeObj('module_config.json', config);
+  if (!config.customModules) { config.customModules = {}; changed = true; }
+  if (changed) {
+    if (dataRestoredFromRemote) {
+      writeObj('module_config.json', config);
+    } else {
+      // 远程数据未恢复，仅写入本地，不覆盖远程已有数据
+      fs.writeFileSync(path.join(DATA_DIR, 'module_config.json'), JSON.stringify(config, null, 2));
+    }
+  }
 }
 initModuleConfig();
 function getModuleConfig() { return readObj('module_config.json'); }
@@ -1387,6 +1516,26 @@ app.post('/api/mentor/reset-attempts', mentorAuth, (req, res) => {
   writeJSON('records.json', remaining);
   res.json({ success: true, removedCount: toRemove.length });
 });
+
+// ===== 优雅关闭：刷写数据到 GitHub =====
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} received, flushing data to GitHub...`);
+  try {
+    // 立即执行一次持久化（跳过 debounce）
+    persistPending = false;
+    clearTimeout(persistTimer);
+    await ghApiPersist();
+    console.log('[server] Data flushed successfully.');
+  } catch(e) {
+    console.error('[server] Flush failed:', e.message);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
