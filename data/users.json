@@ -54,5 +54,13 @@
     "role": "student",
     "token": "tk_e263285de8e64bb452e03946dcc093c494c6772088b9178f",
     "createdAt": "2026-08-17T05:53:18.607Z"
+  },
+  "prank": {
+    "username": "prank",
+    "name": "李明锋",
+    "password": "af565cd91d6e2648c79abf8186638ddc2a25127de5c1b4b85cef462c85709dc1",
+    "role": "student",
+    "token": "tk_7a359af11fc83ea3eec739311ce3ba3760c9d395f1d8a685",
+    "createdAt": "2026-08-17T05:57:46.616Z"
   }
 }
