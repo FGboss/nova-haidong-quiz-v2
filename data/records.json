@@ -1,0 +1,913 @@
+[
+  {
+    "studentName": "全链路测试",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "questions": [
+      {
+        "id": "w1d1_q8",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏亮度通常使用的计量单位是？",
+        "options": [
+          "A. 流明(lm)",
+          "B. 勒克斯(lux)",
+          "C. 尼特(cd/m2)",
+          "D. 瓦特(W)"
+        ],
+        "answer": "C",
+        "explanation": "LED显示屏亮度使用尼特(nit)为单位，即cd/m2（坎德拉每平方米）。户外显示屏亮度一般要求5000-8000nit以上，室内显示屏通常在800-1500nit。流明(lm)用于投影总光通量，勒克斯(lux)用于照度。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-亮度",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q1",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "诺瓦科技（西安诺瓦星云科技股份有限公司）的总部位于哪座城市？",
+        "options": [
+          "A. 深圳",
+          "B. 西安",
+          "C. 北京",
+          "D. 上海"
+        ],
+        "answer": "B",
+        "explanation": "诺瓦科技总部位于西安，全称为西安诺瓦星云科技股份有限公司，是全球领先的LED显示控制解决方案提供商，业务覆盖LED控制系统、视频处理系统、校正系统和云平台四大产品线。",
+        "points": 4,
+        "knowledgePoint": "诺瓦公司介绍-发展历程",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q3",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏行业常说的高刷新率，其常见的高刷值为多少？",
+        "options": [
+          "A. 60Hz",
+          "B. 120Hz",
+          "C. 1920Hz",
+          "D. 3840Hz"
+        ],
+        "answer": "D",
+        "explanation": "LED显示屏的高刷新率通常指3840Hz（也称「金线刷新」或「超清刷新」），部分产品也支持1920Hz。高刷新率能有效减少相机、摄像机拍摄时出现的扫描线（摩尔纹）现象，是舞台租赁和演播室场景的重要指标。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-刷新率",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q4",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏防护等级IP65中的「6」和「5」分别代表什么含义？",
+        "options": [
+          "A. 6级防尘、5级防水",
+          "B. 6级防水、5级防尘",
+          "C. 完全防尘、防低压喷水",
+          "D. 完全防尘、防任何方向喷水"
+        ],
+        "answer": "D",
+        "explanation": "IP等级中第一位数字「6」表示完全防尘（无尘埃进入），第二位数字「5」表示防任何方向的低压喷水。IP65是户外LED显示屏常见的防护等级，可满足户外防雨防尘需求。注意IP65不是防浸泡，防浸泡需IP68等级。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-IP等级",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q2",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏的「像素间距」（Pixel Pitch）是指什么？",
+        "options": [
+          "A. LED灯珠的物理直径",
+          "B. 相邻两个LED像素中心点之间的距离",
+          "C. LED模组的拼接缝隙宽度",
+          "D. LED显示屏的物理厚度"
+        ],
+        "answer": "B",
+        "explanation": "像素间距是指相邻两个LED像素中心点之间的距离，通常以毫米(mm)为单位，如P2、P3.91、P4等。像素间距越小，单位面积内像素点越多，画面越细腻，适合更近的观看距离。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-像素间距",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q6",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "以下哪项不属于诺瓦科技的四大主营产品线？",
+        "options": [
+          "A. LED控制系统",
+          "B. 视频处理系统",
+          "C. 半导体晶圆制造",
+          "D. 校正系统与云平台"
+        ],
+        "answer": "C",
+        "explanation": "诺瓦科技的四大主营产品线为：LED控制系统（发送卡/接收卡）、视频处理系统（各类视频处理器）、校正系统（逐点校正工具）和云平台（GTS等远程管理平台）。诺瓦不涉及半导体晶圆制造业务。",
+        "points": 4,
+        "knowledgePoint": "诺瓦公司介绍-业务版图",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q7",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏扫描方式「1/16扫描」的含义是什么？",
+        "options": [
+          "A. 每行16个LED灯同时点亮",
+          "B. 同时点亮全部LED灯的1/16",
+          "C. 每秒刷新16次",
+          "D. 每16个像素共用一个驱动IC"
+        ],
+        "answer": "B",
+        "explanation": "1/16扫描表示在同一时刻只有1/16的LED灯被点亮，通过快速轮换实现全屏显示。扫描数越大（如1/32），同时点亮的灯越少，功耗越低但亮度也会降低；扫描数越小（如1/1静态扫描），亮度越高但功耗越大。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-扫描方式",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q5",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "当LED显示屏的灰度等级为16bit时，每种颜色可以显示多少级灰阶？",
+        "options": [
+          "A. 256级",
+          "B. 1024级",
+          "C. 32768级",
+          "D. 65536级"
+        ],
+        "answer": "D",
+        "explanation": "16bit灰度即2的16次方=65536级灰阶。灰度等级越高，色彩过渡越平滑，暗部细节表现越好。目前LED显示屏常见灰度等级有13bit（8192级）、14bit（16384级）、16bit（65536级）等。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-灰度",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q9",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "以下哪些属于诺瓦科技的主营产品线？",
+        "options": [
+          "A. LED控制系统（发送卡/接收卡）",
+          "B. 视频处理系统（视频处理器）",
+          "C. 逐点校正系统",
+          "D. 云平台（远程管理平台）"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "诺瓦科技四大主营产品线涵盖：LED控制系统（MCTRL发送卡、MRV/A系列接收卡等）、视频处理系统（V系列、H系列、TB系列等处理器）、校正系统（逐点亮度/色度校正工具）、云平台（GTS远程监控管理平台），构成了完整的LED显示控制解决方案。",
+        "points": 6,
+        "knowledgePoint": "诺瓦公司介绍-主营产品线",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q10",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "LED显示屏的典型应用场景包括以下哪些？",
+        "options": [
+          "A. 广告传媒（户外大屏）",
+          "B. 舞台租赁（演唱会/活动）",
+          "C. 会议室与指挥调度中心",
+          "D. xR虚拟拍摄（影视制作）"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "LED显示屏应用场景广泛，包括：广告传媒（户外广告牌、商圈大屏）、舞台租赁（演唱会、体育赛事、商业活动）、会议与指挥中心（企业会议室、安防指挥调度）、xR虚拟拍摄（利用LED屏作为虚拟背景进行影视拍摄）等，不同场景对产品参数要求不同。",
+        "points": 6,
+        "knowledgePoint": "LED显示行业-应用场景",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q11",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "以下哪些是影响LED显示屏显示效果的核心技术参数？",
+        "options": [
+          "A. 像素间距与刷新率",
+          "B. 灰度等级",
+          "C. 亮度与对比度",
+          "D. 色域覆盖率"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "影响LED显示屏显示效果的核心参数包括：像素间距（决定分辨率密度）、刷新率（影响拍摄效果）、灰度等级（影响色彩层次）、亮度（影响可视性）、对比度（影响画面层次感）、色域覆盖率（影响色彩还原范围）等，这些参数共同决定了显示屏的最终画质表现。",
+        "points": 6,
+        "knowledgePoint": "LED显示基础-核心参数",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q12",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "关于LED显示屏的色域标准，以下说法正确的有哪些？",
+        "options": [
+          "A. sRGB是常见的色域标准之一",
+          "B. DCI-P3是数字电影行业标准色域",
+          "C. Rec.2020是超高清电视色域标准",
+          "D. 色域越宽，可显示的颜色范围越大"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "色域是显示屏能表现的颜色范围。sRGB是传统显示通用标准；DCI-P3是数字电影行业标准，色域比sRGB更宽；Rec.2020是超高清电视(UHD)标准，色域最广。色域越宽，可显示的颜色越丰富，色彩还原越真实。高端LED显示屏通常支持DCI-P3或更宽色域。",
+        "points": 6,
+        "knowledgePoint": "LED显示基础-色域",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d4_q12",
+        "examId": "w1d4",
+        "type": "multiple",
+        "question": "诺瓦LED一体机系统相比传统拼接屏方案的优势包括哪些？",
+        "options": [
+          "A. 集成度更高，系统架构更简化",
+          "B. 部署更便捷，减少设备数量和线缆",
+          "C. 降低系统复杂度和维护成本",
+          "D. 完全不需要接收卡和任何配置"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C"
+        ],
+        "explanation": "LED一体机相比传统拼接屏的优势：集成度高（处理+发送一体化）、部署便捷（减少设备和线缆）、降低成本和维护复杂度。但D选项错误——一体机仍需要接收卡驱动LED模组，也需要进行基本配置，只是整体更简化。",
+        "points": 6,
+        "knowledgePoint": "一体机-对比优势",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q13",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "LED显示屏的像素间距越小，单位面积内像素点越多，显示画面越细腻。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。像素间距越小（如P1.5比P4小），单位面积内的像素点密度越高，分辨率越大，画面越细腻，适合更近的观看距离。这也是小间距LED（P1.5以下）在会议室等近距离观看场景中越来越普及的原因。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-像素间距",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q15",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "诺瓦科技仅生产LED控制系统（发送卡和接收卡），不涉及视频处理产品。",
+        "options": [],
+        "answer": false,
+        "explanation": "错误。诺瓦科技不仅生产LED控制系统（MCTRL系列发送卡、MRV/A系列接收卡等），还拥有完整的视频处理产品线（V系列、H系列、TB系列、TU系列等视频处理器），以及校正系统和云平台，是LED显示控制领域的全栈解决方案提供商。",
+        "points": 5,
+        "knowledgePoint": "诺瓦公司介绍-业务版图",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q14",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "LED显示屏的刷新率越高，用相机或摄像机拍摄时越不容易出现扫描线（摩尔纹）现象。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。高刷新率（如3840Hz）使LED屏的刷新频率远高于相机快门速度，有效减少拍摄时出现的扫描线和闪烁现象。因此舞台租赁、演播室、xR虚拟拍摄等需要相机拍摄的场景必须使用高刷新率LED屏。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-刷新率",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q16",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "IP68防护等级的LED显示屏可以持续浸泡在水中使用。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。IP68中「6」表示完全防尘，「8」表示在特定条件下可持续浸水。IP68是目前较高的防护等级，适用于水下或极端潮湿环境。日常户外LED屏常用IP65（防尘防喷水）即可满足需求。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-IP等级",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d2_q13",
+        "examId": "w1d2",
+        "type": "judge",
+        "question": "EDID是显示器通过接口向信号源发送自身支持的分辨率、刷新率等能力信息的机制。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。EDID（扩展显示标识数据）存储在显示设备中，通过接口（HDMI/DVI/DP等）发送给信号源，告知其本设备支持的分辨率、刷新率、色彩格式等信息，使信号源输出匹配的信号。LED视频处理器可通过配置EDID来引导信号源输出特定分辨率。",
+        "points": 5,
+        "knowledgePoint": "信号源-EDID概念",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q18",
+        "examId": "w1d1",
+        "type": "short",
+        "question": "请列举至少4个LED显示屏的核心技术参数，并简要说明其含义。",
+        "options": [],
+        "answer": "像素间距,刷新率,灰度,亮度,对比度,色域,扫描方式",
+        "explanation": "LED显示屏核心技术参数包括：1.像素间距——相邻像素中心距离(mm)，决定画面细腻度；2.刷新率——屏幕每秒刷新次数(Hz)，影响拍摄效果；3.灰度——每种颜色的亮度等级数(bit)，影响色彩层次；4.亮度——屏幕发光强度(cd/m2)，影响可视性；5.对比度——最亮与最暗的比值，影响画面层次感；6.色域——可显示的颜色范围；7.扫描方式——LED灯的分组点亮方式(1/N)。",
+        "points": 9,
+        "knowledgePoint": "LED显示基础-核心参数",
+        "_type": "short"
+      },
+      {
+        "id": "w1d1_q17",
+        "examId": "w1d1",
+        "type": "short",
+        "question": "请列举诺瓦科技的四大主营产品线，并简要说明各自覆盖的产品方向。",
+        "options": [],
+        "answer": "LED控制系统,视频处理系统,校正系统,云平台",
+        "explanation": "诺瓦科技四大主营产品线：1.LED控制系统——包括发送卡（MCTRL/MSD系列）和接收卡（MRV/A系列）；2.视频处理系统——包括V系列、H系列、TB系列、TU系列等视频处理器；3.校正系统——逐点亮度/色度校正工具，提升屏体均匀性；4.云平台——GTS等远程监控管理平台，实现设备远程运维。",
+        "points": 4,
+        "knowledgePoint": "诺瓦公司介绍-主营产品线",
+        "_type": "short"
+      }
+    ],
+    "answers": {
+      "w1d1_q8": "C",
+      "w1d1_q1": "B",
+      "w1d1_q3": "D",
+      "w1d1_q4": "D",
+      "w1d1_q2": "B",
+      "w1d1_q6": "C",
+      "w1d1_q7": "B",
+      "w1d1_q5": "D",
+      "w1d1_q9": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "w1d1_q10": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "w1d1_q11": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "w1d1_q12": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "w1d4_q12": [
+        "A",
+        "B",
+        "C"
+      ],
+      "w1d1_q13": true,
+      "w1d1_q15": false,
+      "w1d1_q14": true,
+      "w1d1_q16": true,
+      "w1d2_q13": true,
+      "w1d1_q18": "",
+      "w1d1_q17": ""
+    },
+    "attemptNumber": 1,
+    "submitTime": "2026-08-13T02:00:00.000Z",
+    "id": "r_1786585847638_eac9eq",
+    "autoScore": 87,
+    "finalScore": 97,
+    "passed": true,
+    "questionScores": {},
+    "typeScores": {
+      "single": {
+        "score": 32,
+        "max": 32
+      },
+      "multiple": {
+        "score": 30,
+        "max": 30
+      },
+      "judge": {
+        "score": 25,
+        "max": 25
+      },
+      "short": {
+        "score": 10,
+        "max": 13
+      }
+    },
+    "mentorScored": true,
+    "mentorScore": 10
+  },
+  {
+    "studentName": "浏览器测试",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "questions": [
+      {
+        "id": "w1d1_q8",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏亮度通常使用的计量单位是？",
+        "options": [
+          "A. 流明(lm)",
+          "B. 勒克斯(lux)",
+          "C. 尼特(cd/m2)",
+          "D. 瓦特(W)"
+        ],
+        "answer": "C",
+        "explanation": "LED显示屏亮度使用尼特(nit)为单位，即cd/m2（坎德拉每平方米）。户外显示屏亮度一般要求5000-8000nit以上，室内显示屏通常在800-1500nit。流明(lm)用于投影总光通量，勒克斯(lux)用于照度。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-亮度",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q5",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "当LED显示屏的灰度等级为16bit时，每种颜色可以显示多少级灰阶？",
+        "options": [
+          "A. 256级",
+          "B. 1024级",
+          "C. 32768级",
+          "D. 65536级"
+        ],
+        "answer": "D",
+        "explanation": "16bit灰度即2的16次方=65536级灰阶。灰度等级越高，色彩过渡越平滑，暗部细节表现越好。目前LED显示屏常见灰度等级有13bit（8192级）、14bit（16384级）、16bit（65536级）等。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-灰度",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q4",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏防护等级IP65中的「6」和「5」分别代表什么含义？",
+        "options": [
+          "A. 6级防尘、5级防水",
+          "B. 6级防水、5级防尘",
+          "C. 完全防尘、防低压喷水",
+          "D. 完全防尘、防任何方向喷水"
+        ],
+        "answer": "D",
+        "explanation": "IP等级中第一位数字「6」表示完全防尘（无尘埃进入），第二位数字「5」表示防任何方向的低压喷水。IP65是户外LED显示屏常见的防护等级，可满足户外防雨防尘需求。注意IP65不是防浸泡，防浸泡需IP68等级。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-IP等级",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q7",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏扫描方式「1/16扫描」的含义是什么？",
+        "options": [
+          "A. 每行16个LED灯同时点亮",
+          "B. 同时点亮全部LED灯的1/16",
+          "C. 每秒刷新16次",
+          "D. 每16个像素共用一个驱动IC"
+        ],
+        "answer": "B",
+        "explanation": "1/16扫描表示在同一时刻只有1/16的LED灯被点亮，通过快速轮换实现全屏显示。扫描数越大（如1/32），同时点亮的灯越少，功耗越低但亮度也会降低；扫描数越小（如1/1静态扫描），亮度越高但功耗越大。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-扫描方式",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q3",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏行业常说的高刷新率，其常见的高刷值为多少？",
+        "options": [
+          "A. 60Hz",
+          "B. 120Hz",
+          "C. 1920Hz",
+          "D. 3840Hz"
+        ],
+        "answer": "D",
+        "explanation": "LED显示屏的高刷新率通常指3840Hz（也称「金线刷新」或「超清刷新」），部分产品也支持1920Hz。高刷新率能有效减少相机、摄像机拍摄时出现的扫描线（摩尔纹）现象，是舞台租赁和演播室场景的重要指标。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-刷新率",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q6",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "以下哪项不属于诺瓦科技的四大主营产品线？",
+        "options": [
+          "A. LED控制系统",
+          "B. 视频处理系统",
+          "C. 半导体晶圆制造",
+          "D. 校正系统与云平台"
+        ],
+        "answer": "C",
+        "explanation": "诺瓦科技的四大主营产品线为：LED控制系统（发送卡/接收卡）、视频处理系统（各类视频处理器）、校正系统（逐点校正工具）和云平台（GTS等远程管理平台）。诺瓦不涉及半导体晶圆制造业务。",
+        "points": 4,
+        "knowledgePoint": "诺瓦公司介绍-业务版图",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q1",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "诺瓦科技（西安诺瓦星云科技股份有限公司）的总部位于哪座城市？",
+        "options": [
+          "A. 深圳",
+          "B. 西安",
+          "C. 北京",
+          "D. 上海"
+        ],
+        "answer": "B",
+        "explanation": "诺瓦科技总部位于西安，全称为西安诺瓦星云科技股份有限公司，是全球领先的LED显示控制解决方案提供商，业务覆盖LED控制系统、视频处理系统、校正系统和云平台四大产品线。",
+        "points": 4,
+        "knowledgePoint": "诺瓦公司介绍-发展历程",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q2",
+        "examId": "w1d1",
+        "type": "single",
+        "question": "LED显示屏的「像素间距」（Pixel Pitch）是指什么？",
+        "options": [
+          "A. LED灯珠的物理直径",
+          "B. 相邻两个LED像素中心点之间的距离",
+          "C. LED模组的拼接缝隙宽度",
+          "D. LED显示屏的物理厚度"
+        ],
+        "answer": "B",
+        "explanation": "像素间距是指相邻两个LED像素中心点之间的距离，通常以毫米(mm)为单位，如P2、P3.91、P4等。像素间距越小，单位面积内像素点越多，画面越细腻，适合更近的观看距离。",
+        "points": 4,
+        "knowledgePoint": "LED显示基础-像素间距",
+        "_type": "single"
+      },
+      {
+        "id": "w1d4_q1",
+        "examId": "w1d4",
+        "type": "single",
+        "question": "诺瓦TB系列产品的核心定位是什么？",
+        "options": [
+          "A. 独立发送卡",
+          "B. 集成化一体化解决方案，整合处理与发送功能",
+          "C. 云平台软件",
+          "D. 接收卡"
+        ],
+        "answer": "B",
+        "explanation": "TB系列是诺瓦的集成化一体化解决方案产品线，将视频处理和发送卡功能整合到一个设备中，简化了系统架构和部署流程。用户无需单独购买处理器和发送卡，TB系列一体机即可完成信号处理、格式转换和LED数据发送的全部功能，降低了系统复杂度和成本。",
+        "points": 4,
+        "knowledgePoint": "TB系列-产品定位",
+        "_type": "single"
+      },
+      {
+        "id": "w1d1_q9",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "以下哪些属于诺瓦科技的主营产品线？",
+        "options": [
+          "A. LED控制系统（发送卡/接收卡）",
+          "B. 视频处理系统（视频处理器）",
+          "C. 逐点校正系统",
+          "D. 云平台（远程管理平台）"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "诺瓦科技四大主营产品线涵盖：LED控制系统（MCTRL发送卡、MRV/A系列接收卡等）、视频处理系统（V系列、H系列、TB系列等处理器）、校正系统（逐点亮度/色度校正工具）、云平台（GTS远程监控管理平台），构成了完整的LED显示控制解决方案。",
+        "points": 6,
+        "knowledgePoint": "诺瓦公司介绍-主营产品线",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q10",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "LED显示屏的典型应用场景包括以下哪些？",
+        "options": [
+          "A. 广告传媒（户外大屏）",
+          "B. 舞台租赁（演唱会/活动）",
+          "C. 会议室与指挥调度中心",
+          "D. xR虚拟拍摄（影视制作）"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "LED显示屏应用场景广泛，包括：广告传媒（户外广告牌、商圈大屏）、舞台租赁（演唱会、体育赛事、商业活动）、会议与指挥中心（企业会议室、安防指挥调度）、xR虚拟拍摄（利用LED屏作为虚拟背景进行影视拍摄）等，不同场景对产品参数要求不同。",
+        "points": 6,
+        "knowledgePoint": "LED显示行业-应用场景",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q11",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "以下哪些是影响LED显示屏显示效果的核心技术参数？",
+        "options": [
+          "A. 像素间距与刷新率",
+          "B. 灰度等级",
+          "C. 亮度与对比度",
+          "D. 色域覆盖率"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "影响LED显示屏显示效果的核心参数包括：像素间距（决定分辨率密度）、刷新率（影响拍摄效果）、灰度等级（影响色彩层次）、亮度（影响可视性）、对比度（影响画面层次感）、色域覆盖率（影响色彩还原范围）等，这些参数共同决定了显示屏的最终画质表现。",
+        "points": 6,
+        "knowledgePoint": "LED显示基础-核心参数",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q12",
+        "examId": "w1d1",
+        "type": "multiple",
+        "question": "关于LED显示屏的色域标准，以下说法正确的有哪些？",
+        "options": [
+          "A. sRGB是常见的色域标准之一",
+          "B. DCI-P3是数字电影行业标准色域",
+          "C. Rec.2020是超高清电视色域标准",
+          "D. 色域越宽，可显示的颜色范围越大"
+        ],
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "explanation": "色域是显示屏能表现的颜色范围。sRGB是传统显示通用标准；DCI-P3是数字电影行业标准，色域比sRGB更宽；Rec.2020是超高清电视(UHD)标准，色域最广。色域越宽，可显示的颜色越丰富，色彩还原越真实。高端LED显示屏通常支持DCI-P3或更宽色域。",
+        "points": 6,
+        "knowledgePoint": "LED显示基础-色域",
+        "_type": "multiple"
+      },
+      {
+        "id": "w1d1_q15",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "诺瓦科技仅生产LED控制系统（发送卡和接收卡），不涉及视频处理产品。",
+        "options": [],
+        "answer": false,
+        "explanation": "错误。诺瓦科技不仅生产LED控制系统（MCTRL系列发送卡、MRV/A系列接收卡等），还拥有完整的视频处理产品线（V系列、H系列、TB系列、TU系列等视频处理器），以及校正系统和云平台，是LED显示控制领域的全栈解决方案提供商。",
+        "points": 5,
+        "knowledgePoint": "诺瓦公司介绍-业务版图",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q13",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "LED显示屏的像素间距越小，单位面积内像素点越多，显示画面越细腻。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。像素间距越小（如P1.5比P4小），单位面积内的像素点密度越高，分辨率越大，画面越细腻，适合更近的观看距离。这也是小间距LED（P1.5以下）在会议室等近距离观看场景中越来越普及的原因。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-像素间距",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q14",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "LED显示屏的刷新率越高，用相机或摄像机拍摄时越不容易出现扫描线（摩尔纹）现象。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。高刷新率（如3840Hz）使LED屏的刷新频率远高于相机快门速度，有效减少拍摄时出现的扫描线和闪烁现象。因此舞台租赁、演播室、xR虚拟拍摄等需要相机拍摄的场景必须使用高刷新率LED屏。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-刷新率",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q16",
+        "examId": "w1d1",
+        "type": "judge",
+        "question": "IP68防护等级的LED显示屏可以持续浸泡在水中使用。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。IP68中「6」表示完全防尘，「8」表示在特定条件下可持续浸水。IP68是目前较高的防护等级，适用于水下或极端潮湿环境。日常户外LED屏常用IP65（防尘防喷水）即可满足需求。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-IP等级",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d2_q15",
+        "examId": "w1d2",
+        "type": "judge",
+        "question": "在LED控制系统中，一台发送卡可以通过网线级联连接多张接收卡。",
+        "options": [],
+        "answer": true,
+        "explanation": "正确。LED控制系统的典型架构是：发送卡通过网线（或光纤）连接到第一张接收卡，接收卡之间再通过网线级联，形成数据链路。一张发送卡可带载数量不等的接收卡（取决于带载能力），实现大面积LED屏的控制。",
+        "points": 5,
+        "knowledgePoint": "控制卡-系统架构",
+        "_type": "judge"
+      },
+      {
+        "id": "w1d1_q17",
+        "examId": "w1d1",
+        "type": "short",
+        "question": "请列举诺瓦科技的四大主营产品线，并简要说明各自覆盖的产品方向。",
+        "options": [],
+        "answer": "LED控制系统,视频处理系统,校正系统,云平台",
+        "explanation": "诺瓦科技四大主营产品线：1.LED控制系统——包括发送卡（MCTRL/MSD系列）和接收卡（MRV/A系列）；2.视频处理系统——包括V系列、H系列、TB系列、TU系列等视频处理器；3.校正系统——逐点亮度/色度校正工具，提升屏体均匀性；4.云平台——GTS等远程监控管理平台，实现设备远程运维。",
+        "points": 10,
+        "knowledgePoint": "诺瓦公司介绍-主营产品线",
+        "_type": "short"
+      },
+      {
+        "id": "w1d1_q18",
+        "examId": "w1d1",
+        "type": "short",
+        "question": "请列举至少4个LED显示屏的核心技术参数，并简要说明其含义。",
+        "options": [],
+        "answer": "像素间距,刷新率,灰度,亮度,对比度,色域,扫描方式",
+        "explanation": "LED显示屏核心技术参数包括：1.像素间距——相邻像素中心距离(mm)，决定画面细腻度；2.刷新率——屏幕每秒刷新次数(Hz)，影响拍摄效果；3.灰度——每种颜色的亮度等级数(bit)，影响色彩层次；4.亮度——屏幕发光强度(cd/m2)，影响可视性；5.对比度——最亮与最暗的比值，影响画面层次感；6.色域——可显示的颜色范围；7.扫描方式——LED灯的分组点亮方式(1/N)。",
+        "points": 5,
+        "knowledgePoint": "LED显示基础-核心参数",
+        "_type": "short"
+      }
+    ],
+    "answers": {
+      "w1d1_q8": "A"
+    },
+    "attemptNumber": 1,
+    "submitTime": "2026-08-13T01:53:26.350Z",
+    "timeSpent": 11,
+    "id": "r_1786586006557_gm7i08",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "w1d1_q8": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q5": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q4": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q7": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q3": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q6": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q1": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q2": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d4_q1": {
+        "score": 0,
+        "maxScore": 4
+      },
+      "w1d1_q9": {
+        "score": 0,
+        "maxScore": 6
+      },
+      "w1d1_q10": {
+        "score": 0,
+        "maxScore": 6
+      },
+      "w1d1_q11": {
+        "score": 0,
+        "maxScore": 6
+      },
+      "w1d1_q12": {
+        "score": 0,
+        "maxScore": 6
+      },
+      "w1d1_q15": {
+        "score": 0,
+        "maxScore": 5
+      },
+      "w1d1_q13": {
+        "score": 0,
+        "maxScore": 5
+      },
+      "w1d1_q14": {
+        "score": 0,
+        "maxScore": 5
+      },
+      "w1d1_q16": {
+        "score": 0,
+        "maxScore": 5
+      },
+      "w1d2_q15": {
+        "score": 0,
+        "maxScore": 5
+      },
+      "w1d1_q17": {
+        "score": 0,
+        "maxScore": 10
+      },
+      "w1d1_q18": {
+        "score": 0,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 36
+      },
+      "multiple": {
+        "score": 0,
+        "max": 24
+      },
+      "judge": {
+        "score": 0,
+        "max": 25
+      },
+      "short": {
+        "score": 0,
+        "max": 15
+      }
+    },
+    "mentorScored": false
+  },
+  {
+    "studentName": "李学员",
+    "examId": "client_nova_led",
+    "panel": "client",
+    "questions": [
+      {
+        "id": "client_nova_led_q1",
+        "type": "single",
+        "points": 5,
+        "answer": "B"
+      },
+      {
+        "id": "client_nova_led_q2",
+        "type": "single",
+        "points": 5,
+        "answer": "A"
+      }
+    ],
+    "answers": {
+      "client_nova_led_q1": "B",
+      "client_nova_led_q2": "A"
+    },
+    "attemptNumber": 1,
+    "submitTime": "2026-08-13T12:30:00.000Z",
+    "timeSpent": 120,
+    "id": "r_1786623382286_iswv63",
+    "autoScore": 10,
+    "finalScore": 10,
+    "passed": false,
+    "questionScores": {
+      "client_nova_led_q1": {
+        "score": 5,
+        "maxScore": 5
+      },
+      "client_nova_led_q2": {
+        "score": 5,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 10,
+        "max": 10
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
+  }
+]
