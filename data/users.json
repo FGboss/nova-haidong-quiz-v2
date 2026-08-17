@@ -7,14 +7,6 @@
     "createdAt": "2026-08-13T11:04:14.752Z",
     "token": "tk_e0cf90d4827e97a23cfbfb843f2cf75e407774f539aca146"
   },
-  "mentor01": {
-    "username": "mentor01",
-    "name": "张导师",
-    "password": "236977126d6375b9fa5f7ec7d7d7055cf36741c990d9c788f68a8427b08cdf08",
-    "role": "mentor",
-    "createdAt": "2026-08-13T12:11:38.781Z",
-    "token": "tk_e7ba45b85da6beca64d3cdd38def8ff2c84ba9506b55b79e"
-  },
   "李雯锋": {
     "username": "李雯锋",
     "name": "李雯锋",
