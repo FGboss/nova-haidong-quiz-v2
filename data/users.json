@@ -30,5 +30,19 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
     "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
+  },
+  "李明锋": {
+    "username": "李明锋",
+    "name": "李明锋",
+    "password": "hashed_test",
+    "role": "student",
+    "createdAt": "2026-08-17T11:21:48.785Z"
+  },
+  "苏永林": {
+    "username": "苏永林",
+    "name": "苏永林",
+    "password": "hashed_test",
+    "role": "mentor",
+    "createdAt": "2026-08-17T11:21:48.786Z"
   }
 }
