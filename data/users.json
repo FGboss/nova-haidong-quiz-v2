@@ -5,7 +5,7 @@
     "role": "admin",
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
-    "token": "tk_2b88189e31eb0e2be638fc739b0d3b7df7a46b0a78f65987"
+    "token": "tk_e29e3414b736cb36268624ab1545e4c5fe2a34c43a15f7c2"
   },
   "mentor01": {
     "username": "mentor01",
@@ -30,5 +30,19 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
     "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
+  },
+  "验证学员_msx6cbv5": {
+    "username": "验证学员_msx6cbv5",
+    "name": "验证学员_msx6cbv5",
+    "password": "x",
+    "role": "student",
+    "createdAt": "2026-08-17T11:52:32.273Z"
+  },
+  "验证导师_msx6cbv5": {
+    "username": "验证导师_msx6cbv5",
+    "name": "验证导师_msx6cbv5",
+    "password": "x",
+    "role": "mentor",
+    "createdAt": "2026-08-17T11:52:32.274Z"
   }
 }
