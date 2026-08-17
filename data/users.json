@@ -5,7 +5,7 @@
     "role": "admin",
     "name": "超级管理员",
     "createdAt": "2026-08-13T11:04:14.752Z",
-    "token": "tk_f0b28fe76d591cc1fe3a5960991bd4fef4ba8afe7b107192"
+    "token": "tk_e0cf90d4827e97a23cfbfb843f2cf75e407774f539aca146"
   },
   "mentor01": {
     "username": "mentor01",
@@ -14,14 +14,6 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:11:38.781Z",
     "token": "tk_e7ba45b85da6beca64d3cdd38def8ff2c84ba9506b55b79e"
-  },
-  "student01": {
-    "username": "student01",
-    "name": "李学员",
-    "password": "c079b93d71c13c8b44e0d8e55abbdf1fe006e01f67a8b95c45500fb0df3598f8",
-    "role": "student",
-    "token": "tk_31391b0f3c00ca251b1c244ab287318b74a22cbfb8501aa2",
-    "createdAt": "2026-08-13T12:12:35.472Z"
   },
   "李雯锋": {
     "username": "李雯锋",
