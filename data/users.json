@@ -46,5 +46,13 @@
     "role": "student",
     "token": "tk_48d7d1c1b207f9510b27444b7b8a70d44d0ac2b7042a98b2",
     "createdAt": "2026-08-17T05:49:07.437Z"
+  },
+  "Mark": {
+    "username": "Mark",
+    "name": "苏永林",
+    "password": "557173eb092f0807437a9771e5b7874370a9b2e5c7a64428fffbc38ddd9c28f0",
+    "role": "student",
+    "token": "tk_e263285de8e64bb452e03946dcc093c494c6772088b9178f",
+    "createdAt": "2026-08-17T05:53:18.607Z"
   }
 }
