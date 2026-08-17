@@ -909,37 +909,5 @@
       }
     },
     "mentorScored": false
-  },
-  {
-    "id": "r_test_1786965708787",
-    "studentName": "李明锋",
-    "examId": "w1d1",
-    "autoScore": 98,
-    "finalScore": 98,
-    "passed": true,
-    "submitTime": "2026-08-17T11:21:48.787Z",
-    "questions": [
-      {
-        "id": "q1",
-        "type": "single",
-        "points": 5
-      }
-    ],
-    "answers": {
-      "q1": "A"
-    },
-    "questionScores": {
-      "q1": {
-        "score": 5,
-        "maxScore": 5
-      }
-    },
-    "typeScores": {
-      "single": {
-        "score": 5,
-        "max": 5
-      }
-    },
-    "mentorScored": false
   }
 ]
