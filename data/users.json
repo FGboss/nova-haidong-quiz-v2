@@ -30,19 +30,5 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
     "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
-  },
-  "验证学员_msx6cbv5": {
-    "username": "验证学员_msx6cbv5",
-    "name": "验证学员_msx6cbv5",
-    "password": "x",
-    "role": "student",
-    "createdAt": "2026-08-17T11:52:32.273Z"
-  },
-  "验证导师_msx6cbv5": {
-    "username": "验证导师_msx6cbv5",
-    "name": "验证导师_msx6cbv5",
-    "password": "x",
-    "role": "mentor",
-    "createdAt": "2026-08-17T11:52:32.274Z"
   }
 }
