@@ -380,7 +380,7 @@ const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销
 
 // 健康检查
 app.get('/api/health', async (req, res) => {
-  res.json({ success: true, time: new Date().toISOString(), version: '2.1', panels: await getAllPanels() });
+  res.json({ success: true, time: new Date().toISOString(), version: '2.2', panels: await getAllPanels() });
 });
 
 // ===== 用户认证 API =====
