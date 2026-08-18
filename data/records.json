@@ -1523,5 +1523,154 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "评分测试A",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "mq_a": "ABCD"
+    },
+    "questions": [
+      {
+        "id": "mq_a",
+        "type": "multiple",
+        "question": "多选",
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "points": 7
+      }
+    ],
+    "timeSpent": 60,
+    "id": "r_1787042501084_wclekb",
+    "submitTime": "2026-08-18T08:41:41.084Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "mq_a": {
+        "score": 0,
+        "maxScore": 7
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 7
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
+  },
+  {
+    "studentName": "评分测试B",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "jq_b": "A"
+    },
+    "questions": [
+      {
+        "id": "jq_b",
+        "type": "judge",
+        "question": "判断",
+        "answer": true,
+        "points": 5
+      }
+    ],
+    "timeSpent": 61,
+    "id": "r_1787042503123_04wfav",
+    "submitTime": "2026-08-18T08:41:43.123Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "jq_b": {
+        "score": 0,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 5
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
+  },
+  {
+    "studentName": "评分测试C",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "jq_c": "B"
+    },
+    "questions": [
+      {
+        "id": "jq_c",
+        "type": "judge",
+        "question": "判断",
+        "answer": false,
+        "points": 5
+      }
+    ],
+    "timeSpent": 62,
+    "id": "r_1787042504857_ae7lct",
+    "submitTime": "2026-08-18T08:41:44.857Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "jq_c": {
+        "score": 0,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 5
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
