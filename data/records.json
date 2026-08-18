@@ -909,19 +909,5 @@
       }
     },
     "mentorScored": false
-  },
-  {
-    "id": "r_final_1787015510007",
-    "studentName": "端到端学员_msxyw8af",
-    "examId": "w1d1",
-    "autoScore": 95,
-    "finalScore": 95,
-    "passed": true,
-    "submitTime": "2026-08-18T01:11:50.009Z",
-    "questions": [],
-    "answers": {},
-    "questionScores": {},
-    "typeScores": {},
-    "mentorScored": false
   }
 ]
