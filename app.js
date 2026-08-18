@@ -822,17 +822,17 @@ function showRecordDetailModal(record){
 }
 
 // ===== 导师/管理面板 =====
-function goMentor(){
+async function goMentor(){
   state.page = 'mentor';
   state.mentorTab = 'overview';
-  syncAllRecords();
+  await syncAllRecords();
   render();
 }
 
-function goAdmin(){
+async function goAdmin(){
   state.page = 'admin';
   state.adminTab = 'users';
-  loadAdminUsers();
+  await loadAdminUsers();
   render();
 }
 
