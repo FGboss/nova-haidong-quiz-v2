@@ -909,5 +909,65 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "测试学员",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "w1d1_q1": "A",
+      "w1d1_q2": "B"
+    },
+    "questions": [
+      {
+        "id": "w1d1_q1",
+        "type": "single",
+        "question": "测试题1",
+        "answer": "A",
+        "points": 10
+      },
+      {
+        "id": "w1d1_q2",
+        "type": "single",
+        "question": "测试题2",
+        "answer": "B",
+        "points": 10
+      }
+    ],
+    "timeSpent": 120,
+    "id": "r_1787040123911_wtggkj",
+    "submitTime": "2026-08-18T08:02:03.911Z",
+    "autoScore": 20,
+    "finalScore": 20,
+    "passed": false,
+    "questionScores": {
+      "w1d1_q1": {
+        "score": 10,
+        "maxScore": 10
+      },
+      "w1d1_q2": {
+        "score": 10,
+        "maxScore": 10
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 20,
+        "max": 20
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
