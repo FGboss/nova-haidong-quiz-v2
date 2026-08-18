@@ -1374,5 +1374,154 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "云端测试",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "mq1": "ABCD"
+    },
+    "questions": [
+      {
+        "id": "mq1",
+        "type": "multiple",
+        "question": "多选测试",
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "points": 7
+      }
+    ],
+    "timeSpent": 60,
+    "id": "r_1787042425876_h08uq3",
+    "submitTime": "2026-08-18T08:40:25.876Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "mq1": {
+        "score": 0,
+        "maxScore": 7
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 7
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
+  },
+  {
+    "studentName": "云端测试",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "jq1": "A"
+    },
+    "questions": [
+      {
+        "id": "jq1",
+        "type": "judge",
+        "question": "判断测试",
+        "answer": true,
+        "points": 5
+      }
+    ],
+    "timeSpent": 60,
+    "id": "r_1787042426647_2vayqg",
+    "submitTime": "2026-08-18T08:40:26.647Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "jq1": {
+        "score": 0,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 5
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
+  },
+  {
+    "studentName": "云端测试",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "jq2": "B"
+    },
+    "questions": [
+      {
+        "id": "jq2",
+        "type": "judge",
+        "question": "判断测试",
+        "answer": false,
+        "points": 5
+      }
+    ],
+    "timeSpent": 60,
+    "id": "r_1787042427450_erqe25",
+    "submitTime": "2026-08-18T08:40:27.450Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "jq2": {
+        "score": 0,
+        "maxScore": 5
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 0
+      },
+      "judge": {
+        "score": 0,
+        "max": 5
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
