@@ -36,7 +36,8 @@
     "name": "苏永林",
     "password": "9583491489fba35a1c679ad4673343ebd9ca9e61734e1176c51afefc6cad40ea",
     "role": "mentor",
-    "createdAt": "2026-08-18T08:26:03.360Z"
+    "createdAt": "2026-08-18T08:26:03.360Z",
+    "token": "tk_e281c78e3c47841779d59a8269f284f2e6838cda2d984829"
   },
   "lwf": {
     "username": "lwf",
