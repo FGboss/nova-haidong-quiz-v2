@@ -30,19 +30,5 @@
     "role": "mentor",
     "createdAt": "2026-08-13T12:22:32.891Z",
     "token": "tk_55a519ddcdbc59908538ce6add3717a429731fa80f3f6344"
-  },
-  "端到端学员_msxyw8af": {
-    "username": "端到端学员_msxyw8af",
-    "name": "端到端学员_msxyw8af",
-    "password": "x",
-    "role": "student",
-    "createdAt": "2026-08-18T01:11:50.007Z"
-  },
-  "端到端导师_msxyw8af": {
-    "username": "端到端导师_msxyw8af",
-    "name": "端到端导师_msxyw8af",
-    "password": "x",
-    "role": "mentor",
-    "createdAt": "2026-08-18T01:11:50.009Z"
   }
 }
