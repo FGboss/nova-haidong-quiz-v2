@@ -114,12 +114,12 @@ function writeObj(filename, data) {
 let persistQueue = new Set();
 let persistRunning = false;
 let persistTimer = null;
+let startupComplete = false; // 启动完成后才允许持久化
 
 function gitPersist() {
-  // 标记所有 JSON 文件为待同步
+  if (!startupComplete) return; // 启动阶段不触发持久化，防止覆盖远程数据
   const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
   for (const f of dataFiles) persistQueue.add(f);
-  // 延迟 50ms 合并连续写入，但不超过 50ms
   clearTimeout(persistTimer);
   persistTimer = setTimeout(runPersist, 50);
 }
@@ -143,7 +143,7 @@ async function runPersist() {
     let hasChanged = true;
     try {
       const shaResult = execSync(
-        `curl -s --connect-timeout 5 --max-time 10 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+        `curl -sf --connect-timeout 5 --max-time 10 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
         { timeout: 15000, stdio: 'pipe' }
       ).toString();
       const shaData = JSON.parse(shaResult);
@@ -157,7 +157,7 @@ async function runPersist() {
 
     if (!hasChanged) continue;
 
-    // 用 curl 执行 PUT（比 Node.js https 模块更可靠，自动处理代理）
+    // 用 curl 执行 PUT（-f 确保 HTTP 错误时 exit code 非零）
     const body = JSON.stringify({
       message: 'data: auto-persist',
       content: localContentBase64,
@@ -170,14 +170,22 @@ async function runPersist() {
     for (let attempt = 0; attempt < MAX_RETRIES && !success; attempt++) {
       if (attempt > 0) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
       try {
-        execSync(
-          `curl -s --connect-timeout 5 --max-time 15 -X PUT -H "Authorization: token ${GH_TOKEN}" -H "Content-Type: application/json" -d @${tmpFile} https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+        const putResult = execSync(
+          `curl -sf --connect-timeout 5 --max-time 15 -X PUT -H "Authorization: token ${GH_TOKEN}" -H "Content-Type: application/json" -d @${tmpFile} https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
           { timeout: 20000, stdio: 'pipe' }
-        );
-        success = true;
-        console.log(`[persist] ${f} → OK`);
+        ).toString();
+        // 验证响应：GitHub 成功响应包含 content 字段
+        const putData = JSON.parse(putResult);
+        if (putData.content && putData.content.sha) {
+          success = true;
+          console.log(`[persist] ${f} → OK`);
+        } else if (putData.message) {
+          console.error(`[persist] ${f}: GitHub API error — ${putData.message}`);
+        } else {
+          console.error(`[persist] ${f}: unexpected response`);
+        }
       } catch(e) {
-        console.error(`[persist] ${f}: attempt ${attempt + 1}/${MAX_RETRIES} failed (${(e.message || '').slice(0, 60)})`);
+        console.error(`[persist] ${f}: attempt ${attempt + 1}/${MAX_RETRIES} failed (${(e.message || '').slice(0, 80)})`);
       }
     }
     try { fs.unlinkSync(tmpFile); } catch(e) {}
@@ -186,8 +194,9 @@ async function runPersist() {
   persistRunning = false;
 }
 
-// ===== 启动时数据恢复：从 GitHub API 拉取最新数据（含重试） =====
-let dataRestoredFromRemote = false;
+// ===== 启动时数据恢复：从 GitHub API 拉取最新数据 =====
+// 使用 Set 记录每个文件是否恢复成功，防止部分恢复导致数据覆盖
+let restoredFiles = new Set();
 function setupGit() {
   const filesToRestore = ['records.json', 'users.json', 'mentors.json', 'module_config.json', 'new_product_meta.json', 'plan.json', 'question_overrides.json'];
   const MAX_STARTUP_RETRIES = 3;
@@ -200,13 +209,16 @@ function setupGit() {
     for (let retry = 0; retry < MAX_STARTUP_RETRIES && !restored; retry++) {
       if (retry > 0) {
         const delay = Math.pow(2, retry) * 1000;
-        console.log(`[setup] Retry ${retry}/${MAX_STARTUP_RETRIES} for ${f} in ${delay}ms...`);
-        execSync(`sleep ${delay / 1000}`, { stdio: 'pipe', timeout: delay + 2000 });
+        try {
+          execSync(`sleep ${delay / 1000}`, { stdio: 'pipe', timeout: delay + 2000 });
+        } catch(e) {
+          // sleep 失败不阻塞，继续重试
+        }
       }
 
       try {
         const content = execSync(
-          `curl -s --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
+          `curl -sf --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
           { timeout: 20000, stdio: 'pipe' }
         ).toString();
 
@@ -218,7 +230,7 @@ function setupGit() {
           // 检测 GitHub API 错误响应
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             if (parsed.message && parsed.documentation_url) {
-              console.log(`[setup] ${f}: GitHub API error (${parsed.message})`);
+              console.log(`[setup] ${f}: GitHub API says — ${parsed.message}`);
               continue;
             }
           }
@@ -235,11 +247,12 @@ function setupGit() {
             fs.writeFileSync(localPath, content);
             console.log(`[setup] Restored ${f} (remote=${remoteSize} local=${localSize})`);
             anyRestored = true;
-            dataRestoredFromRemote = true;
+            restoredFiles.add(f);
             restored = true;
           } else {
             console.log(`[setup] Kept local ${f} (local=${localSize} > remote=${remoteSize})`);
             anyRestored = true;
+            restoredFiles.add(f);
             restored = true;
           }
         } catch(parseErr) {
@@ -247,6 +260,7 @@ function setupGit() {
             fs.writeFileSync(localPath, content);
             console.log(`[setup] Restored ${f} (fallback)`);
             anyRestored = true;
+            restoredFiles.add(f);
             restored = true;
           }
         }
@@ -271,14 +285,39 @@ function setupGit() {
     }
   }
 
-  console.log(`[setup] Data restore complete. Remote=${dataRestoredFromRemote}, Files=${anyRestored ? 'OK' : 'NONE'}`);
+  console.log(`[setup] Restore complete. Files restored: ${restoredFiles.size}/${filesToRestore.length}`);
 }
 setupGit();
 
 // ===== 初始化超级管理员 =====
+// 重要：启动阶段绝不触发 gitPersist()，防止覆盖远程已有数据
 function initSuperAdmin() {
   const users = readObj('users.json');
   if (!users['PC']) {
+    // 如果 users.json 未从远程恢复，尝试单独恢复一次
+    if (!restoredFiles.has('users.json')) {
+      try {
+        const content = execSync(
+          `curl -sf --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/users.json`,
+          { timeout: 20000, stdio: 'pipe' }
+        ).toString();
+        if (content && content.length > 10) {
+          const remoteUsers = JSON.parse(content);
+          if (remoteUsers && typeof remoteUsers === 'object' && !Array.isArray(remoteUsers) && !remoteUsers.message) {
+            fs.writeFileSync(path.join(DATA_DIR, 'users.json'), content);
+            console.log(`[init] users.json restored on retry (${Object.keys(remoteUsers).length} users)`);
+            restoredFiles.add('users.json');
+            // 重新读取
+            const reRead = readObj('users.json');
+            if (reRead['PC']) return;
+          }
+        }
+      } catch(e) {
+        console.log('[init] users.json retry failed: ' + (e.message || '').slice(0, 60));
+      }
+    }
+
+    // 仍未找到 PC，创建之（仅写本地，不触发持久化）
     users['PC'] = {
       username: 'PC',
       password: crypto.createHash('sha256').update('password123').digest('hex'),
@@ -286,16 +325,9 @@ function initSuperAdmin() {
       name: '超级管理员',
       createdAt: new Date().toISOString()
     };
-    if (dataRestoredFromRemote) {
-      // 远程数据已恢复，正常写入并触发持久化
-      writeObj('users.json', users);
-    } else {
-      // 远程数据未恢复，仅写入本地，不覆盖远程已有数据
-      fs.writeFileSync(path.join(DATA_DIR, 'users.json'), JSON.stringify(users, null, 2));
-      console.log('[init] Super admin initialized (local only, remote data preserved).');
-      return;
-    }
-    console.log('[init] Super admin initialized.');
+    fs.writeFileSync(path.join(DATA_DIR, 'users.json'), JSON.stringify(users, null, 2));
+    fs.writeFileSync(path.join(DATA_DIR, 'users.json') + '.bak', JSON.stringify(users, null, 2));
+    console.log('[init] Super admin PC created (local only, NOT pushed to remote).');
   }
 }
 initSuperAdmin();
@@ -317,12 +349,11 @@ function initModuleConfig() {
   }
   if (!config.customModules) { config.customModules = {}; changed = true; }
   if (changed) {
-    if (dataRestoredFromRemote) {
-      writeObj('module_config.json', config);
-    } else {
-      // 远程数据未恢复，仅写入本地，不覆盖远程已有数据
-      fs.writeFileSync(path.join(DATA_DIR, 'module_config.json'), JSON.stringify(config, null, 2));
-    }
+    // 仅写本地，不触发持久化（与 initSuperAdmin 保持一致）
+    const p = path.join(DATA_DIR, 'module_config.json');
+    fs.writeFileSync(p, JSON.stringify(config, null, 2));
+    fs.writeFileSync(p + '.bak', JSON.stringify(config, null, 2));
+    console.log('[init] Module config initialized (local only).');
   }
 }
 initModuleConfig();
@@ -1545,16 +1576,23 @@ async function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// ===== 定期同步：每 30 秒确保数据已同步到 GitHub =====
-setInterval(() => {
-  const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
-  for (const f of dataFiles) persistQueue.add(f);
-  runPersist().catch(e => console.error('[sync] Periodic sync failed:', e.message));
-}, 30000);
+// ===== 定期同步：每 5 分钟确保数据已同步到 GitHub =====
+// 首次延迟 60 秒，避免启动时覆盖远程数据
+let syncInterval = null;
+setTimeout(() => {
+  syncInterval = setInterval(() => {
+    const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+    for (const f of dataFiles) persistQueue.add(f);
+    runPersist().catch(e => console.error('[sync] Periodic sync failed:', e.message));
+  }, 300000); // 5 分钟
+}, 60000); // 首次延迟 60 秒
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+  // 启动完成，现在允许持久化
+  startupComplete = true;
   console.log(`[server] Quiz System V3 running on port ${PORT}`);
+  console.log(`[server] Startup complete — persistence enabled.`);
   console.log(`[server] Panels: ${getAllPanels().join(', ')}`);
   console.log(`[server] Passing score: ${PASSING_SCORE}, Max attempts: ${MAX_ATTEMPTS}`);
   let totalQ = 0;
@@ -1562,4 +1600,10 @@ app.listen(PORT, () => {
     try { totalQ += loadQuestions(exam.questionFile).length; } catch(e) {}
   }
   console.log(`[server] Total questions loaded: ${totalQ}`);
+  // 启动后 5 秒做首次同步
+  setTimeout(() => {
+    const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+    for (const f of dataFiles) persistQueue.add(f);
+    runPersist().catch(e => console.error('[sync] Initial sync failed:', e.message));
+  }, 5000);
 });
