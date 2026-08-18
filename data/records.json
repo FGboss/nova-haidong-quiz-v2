@@ -1831,5 +1831,58 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "v2test2",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "v2q2": "ABCD"
+    },
+    "questions": [
+      {
+        "id": "v2q2",
+        "type": "multiple",
+        "question": "t",
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "points": 7
+      }
+    ],
+    "timeSpent": 400,
+    "id": "r_1787042965198_bdleby",
+    "submitTime": "2026-08-18T08:49:25.198Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "v2q2": {
+        "score": 0,
+        "maxScore": 7
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 7
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
