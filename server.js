@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
 const XLSX = require('xlsx');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -42,282 +41,15 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const PASSING_SCORE = 95;
 const MAX_ATTEMPTS = 10;
 
-// ===== 数据持久化：GitHub Token =====
-const HARDCODED_GH_TOKEN = ['gho','_zzorloXSA8VX8sUiQX7BwkbH','HPbAZR1PWj66'].join('');
-const GH_TOKEN = process.env.GH_TOKEN || HARDCODED_GH_TOKEN;
-const GH_REPO = process.env.GH_REPO || 'FGboss/nova-haidong-quiz-v2';
-
 const TYPE_ORDER = ['single', 'multiple', 'judge', 'short'];
 
-// ===== 数据读写（含本地备份） =====
-function readJSON(filename) {
-  const p = path.join(DATA_DIR, filename);
-  if (!fs.existsSync(p)) {
-    // 尝试从备份恢复
-    const bak = p + '.bak';
-    if (fs.existsSync(bak)) {
-      try { return JSON.parse(fs.readFileSync(bak, 'utf8')); } catch(e) {}
-    }
-    return [];
-  }
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e) {
-    const bak = p + '.bak';
-    if (fs.existsSync(bak)) {
-      try { return JSON.parse(fs.readFileSync(bak, 'utf8')); } catch(e2) {}
-    }
-    return [];
-  }
-}
-function writeJSON(filename, data) {
-  const p = path.join(DATA_DIR, filename);
-  const json = JSON.stringify(data, null, 2);
-  fs.writeFileSync(p, json);
-  // 写入本地备份
-  fs.writeFileSync(p + '.bak', json);
-  gitPersist();
-}
-function readObj(filename) {
-  const p = path.join(DATA_DIR, filename);
-  if (!fs.existsSync(p)) {
-    const bak = p + '.bak';
-    if (fs.existsSync(bak)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(bak, 'utf8'));
-        return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
-      } catch(e) {}
-    }
-    return {};
-  }
-  try {
-    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
-  } catch(e) {
-    const bak = p + '.bak';
-    if (fs.existsSync(bak)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(bak, 'utf8'));
-        return (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
-      } catch(e2) {}
-    }
-    return {};
-  }
-}
-function writeObj(filename, data) {
-  const p = path.join(DATA_DIR, filename);
-  const json = JSON.stringify(data, null, 2);
-  fs.writeFileSync(p, json);
-  fs.writeFileSync(p + '.bak', json);
-  gitPersist();
-}
-
-// ===== GitHub 持久化（无防抖，立即排队） =====
-let persistQueue = new Set();
-let persistRunning = false;
-let persistTimer = null;
-let startupComplete = false; // 启动完成后才允许持久化
-
-function gitPersist() {
-  if (!startupComplete) return; // 启动阶段不触发持久化，防止覆盖远程数据
-  const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
-  for (const f of dataFiles) persistQueue.add(f);
-  clearTimeout(persistTimer);
-  persistTimer = setTimeout(runPersist, 50);
-}
-
-async function runPersist() {
-  if (persistRunning) return;
-  persistRunning = true;
-  const files = [...persistQueue];
-  persistQueue.clear();
-
-  const MAX_RETRIES = 3;
-
-  for (const f of files) {
-    const p = path.join(DATA_DIR, f);
-    if (!fs.existsSync(p)) continue;
-    const content = fs.readFileSync(p, 'utf8');
-    const localContentBase64 = Buffer.from(content).toString('base64');
-
-    // 获取远程 SHA 检查是否变更
-    let remoteSha = '';
-    let hasChanged = true;
-    try {
-      const shaResult = execSync(
-        `curl -sf --connect-timeout 5 --max-time 10 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
-        { timeout: 15000, stdio: 'pipe' }
-      ).toString();
-      const shaData = JSON.parse(shaResult);
-      if (shaData.sha) {
-        remoteSha = shaData.sha;
-        if (shaData.content && shaData.content.replace(/\s/g, '') === localContentBase64.replace(/\s/g, '')) {
-          hasChanged = false;
-        }
-      }
-    } catch(e) { hasChanged = true; }
-
-    if (!hasChanged) continue;
-
-    // 用 curl 执行 PUT（-f 确保 HTTP 错误时 exit code 非零）
-    const body = JSON.stringify({
-      message: 'data: auto-persist',
-      content: localContentBase64,
-      ...(remoteSha ? { sha: remoteSha } : {})
-    });
-    const tmpFile = `/tmp/persist_${f}_${Date.now()}.json`;
-    fs.writeFileSync(tmpFile, body);
-
-    let success = false;
-    for (let attempt = 0; attempt < MAX_RETRIES && !success; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
-      try {
-        const putResult = execSync(
-          `curl -sf --connect-timeout 5 --max-time 15 -X PUT -H "Authorization: token ${GH_TOKEN}" -H "Content-Type: application/json" -d @${tmpFile} https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
-          { timeout: 20000, stdio: 'pipe' }
-        ).toString();
-        // 验证响应：GitHub 成功响应包含 content 字段
-        const putData = JSON.parse(putResult);
-        if (putData.content && putData.content.sha) {
-          success = true;
-          console.log(`[persist] ${f} → OK`);
-        } else if (putData.message) {
-          console.error(`[persist] ${f}: GitHub API error — ${putData.message}`);
-        } else {
-          console.error(`[persist] ${f}: unexpected response`);
-        }
-      } catch(e) {
-        console.error(`[persist] ${f}: attempt ${attempt + 1}/${MAX_RETRIES} failed (${(e.message || '').slice(0, 80)})`);
-      }
-    }
-    try { fs.unlinkSync(tmpFile); } catch(e) {}
-    if (!success) console.error(`[persist] ${f}: ALL ${MAX_RETRIES} attempts failed — data only in local + backup`);
-  }
-  persistRunning = false;
-}
-
-// ===== 启动时数据恢复：从 GitHub API 拉取最新数据 =====
-// 使用 Set 记录每个文件是否恢复成功，防止部分恢复导致数据覆盖
-let restoredFiles = new Set();
-function setupGit() {
-  const filesToRestore = ['records.json', 'users.json', 'mentors.json', 'module_config.json', 'new_product_meta.json', 'plan.json', 'question_overrides.json'];
-  const MAX_STARTUP_RETRIES = 3;
-  let anyRestored = false;
-
-  for (const f of filesToRestore) {
-    const localPath = path.join(DATA_DIR, f);
-    let restored = false;
-
-    for (let retry = 0; retry < MAX_STARTUP_RETRIES && !restored; retry++) {
-      if (retry > 0) {
-        const delay = Math.pow(2, retry) * 1000;
-        try {
-          execSync(`sleep ${delay / 1000}`, { stdio: 'pipe', timeout: delay + 2000 });
-        } catch(e) {
-          // sleep 失败不阻塞，继续重试
-        }
-      }
-
-      try {
-        const content = execSync(
-          `curl -sf --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/${f}`,
-          { timeout: 20000, stdio: 'pipe' }
-        ).toString();
-
-        if (!content || content.length < 10) continue;
-
-        try {
-          const parsed = JSON.parse(content);
-
-          // 检测 GitHub API 错误响应
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            if (parsed.message && parsed.documentation_url) {
-              console.log(`[setup] ${f}: GitHub API says — ${parsed.message}`);
-              continue;
-            }
-          }
-
-          let localData = null;
-          if (fs.existsSync(localPath)) {
-            try { localData = JSON.parse(fs.readFileSync(localPath, 'utf8')); } catch(e) {}
-          }
-
-          const remoteSize = Array.isArray(parsed) ? parsed.length : Object.keys(parsed).length;
-          const localSize = localData ? (Array.isArray(localData) ? localData.length : Object.keys(localData).length) : 0;
-
-          if (!localData || remoteSize >= localSize) {
-            fs.writeFileSync(localPath, content);
-            console.log(`[setup] Restored ${f} (remote=${remoteSize} local=${localSize})`);
-            anyRestored = true;
-            restoredFiles.add(f);
-            restored = true;
-          } else {
-            console.log(`[setup] Kept local ${f} (local=${localSize} > remote=${remoteSize})`);
-            anyRestored = true;
-            restoredFiles.add(f);
-            restored = true;
-          }
-        } catch(parseErr) {
-          if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 10) {
-            fs.writeFileSync(localPath, content);
-            console.log(`[setup] Restored ${f} (fallback)`);
-            anyRestored = true;
-            restoredFiles.add(f);
-            restored = true;
-          }
-        }
-      } catch(e3) {
-        console.log(`[setup] ${f} attempt ${retry + 1} failed: ${(e3.message || 'network error').slice(0, 80)}`);
-      }
-    }
-    if (!restored) console.log(`[setup] ${f}: ALL ${MAX_STARTUP_RETRIES} attempts failed`);
-  }
-
-  // 如果 GitHub API 恢复部分失败，尝试从本地 .bak 文件恢复
-  if (!anyRestored) {
-    console.log('[setup] GitHub API restore failed, trying local backups...');
-    for (const f of filesToRestore) {
-      const localPath = path.join(DATA_DIR, f);
-      const bakPath = localPath + '.bak';
-      if (!fs.existsSync(localPath) && fs.existsSync(bakPath)) {
-        fs.copyFileSync(bakPath, localPath);
-        console.log(`[setup] Restored ${f} from local backup`);
-        anyRestored = true;
-      }
-    }
-  }
-
-  console.log(`[setup] Restore complete. Files restored: ${restoredFiles.size}/${filesToRestore.length}`);
-}
-setupGit();
+// ===== 数据持久化：Supabase PostgreSQL =====
+const db = require('./db');
 
 // ===== 初始化超级管理员 =====
-// 重要：启动阶段绝不触发 gitPersist()，防止覆盖远程已有数据
-function initSuperAdmin() {
-  const users = readObj('users.json');
+async function initSuperAdmin() {
+  const users = await db.readObj('users.json');
   if (!users['PC']) {
-    // 如果 users.json 未从远程恢复，尝试单独恢复一次
-    if (!restoredFiles.has('users.json')) {
-      try {
-        const content = execSync(
-          `curl -sf --connect-timeout 5 --max-time 15 -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github.v3.raw" https://api.github.com/repos/${GH_REPO}/contents/data/users.json`,
-          { timeout: 20000, stdio: 'pipe' }
-        ).toString();
-        if (content && content.length > 10) {
-          const remoteUsers = JSON.parse(content);
-          if (remoteUsers && typeof remoteUsers === 'object' && !Array.isArray(remoteUsers) && !remoteUsers.message) {
-            fs.writeFileSync(path.join(DATA_DIR, 'users.json'), content);
-            console.log(`[init] users.json restored on retry (${Object.keys(remoteUsers).length} users)`);
-            restoredFiles.add('users.json');
-            // 重新读取
-            const reRead = readObj('users.json');
-            if (reRead['PC']) return;
-          }
-        }
-      } catch(e) {
-        console.log('[init] users.json retry failed: ' + (e.message || '').slice(0, 60));
-      }
-    }
-
-    // 仍未找到 PC，创建之（仅写本地，不触发持久化）
     users['PC'] = {
       username: 'PC',
       password: crypto.createHash('sha256').update('password123').digest('hex'),
@@ -325,16 +57,14 @@ function initSuperAdmin() {
       name: '超级管理员',
       createdAt: new Date().toISOString()
     };
-    fs.writeFileSync(path.join(DATA_DIR, 'users.json'), JSON.stringify(users, null, 2));
-    fs.writeFileSync(path.join(DATA_DIR, 'users.json') + '.bak', JSON.stringify(users, null, 2));
-    console.log('[init] Super admin PC created (local only, NOT pushed to remote).');
+    await db.writeObj('users.json', users);
+    console.log('[init] Super admin PC created.');
   }
 }
-initSuperAdmin();
 
 // ===== 初始化模块配置 =====
-function initModuleConfig() {
-  const config = readObj('module_config.json');
+async function initModuleConfig() {
+  const config = await db.readObj('module_config.json');
   const defaults = {
     newbie: { id: 'newbie', name: '新人专项', icon: '📚', desc: '3周系统培训考核，每日一考+周考，15套试卷覆盖产品基础知识', bankIds: [] },
     tech: { id: 'tech', name: '技术进阶', icon: '🔧', desc: '按产品系列深度考核，涵盖参数、性能、技术排查和系统架构', bankIds: [] },
@@ -349,15 +79,11 @@ function initModuleConfig() {
   }
   if (!config.customModules) { config.customModules = {}; changed = true; }
   if (changed) {
-    // 仅写本地，不触发持久化（与 initSuperAdmin 保持一致）
-    const p = path.join(DATA_DIR, 'module_config.json');
-    fs.writeFileSync(p, JSON.stringify(config, null, 2));
-    fs.writeFileSync(p + '.bak', JSON.stringify(config, null, 2));
-    console.log('[init] Module config initialized (local only).');
+    await db.writeObj('module_config.json', config);
+    console.log('[init] Module config initialized.');
   }
 }
-initModuleConfig();
-function getModuleConfig() { return readObj('module_config.json'); }
+async function getModuleConfig() { return await db.readObj('module_config.json'); }
 
 // ===== 用户认证 =====
 function hashPassword(pwd) {
@@ -368,34 +94,40 @@ function generateToken() {
   return 'tk_' + crypto.randomBytes(24).toString('hex');
 }
 
-function authMiddleware(req, res, next) {
-  const token = req.headers['x-auth-token'];
-  if (!token) return res.status(401).json({ error: '未登录' });
-  const users = readObj('users.json');
-  const user = Object.values(users).find(u => u.token === token);
-  if (!user) return res.status(401).json({ error: '登录已过期' });
-  req.currentUser = user;
-  next();
+async function authMiddleware(req, res, next) {
+  try {
+    const token = req.headers['x-auth-token'];
+    if (!token) return res.status(401).json({ error: '未登录' });
+    const users = await db.readObj('users.json');
+    const user = Object.values(users).find(u => u.token === token);
+    if (!user) return res.status(401).json({ error: '登录已过期' });
+    req.currentUser = user;
+    next();
+  } catch(e) { next(e); }
 }
 
-function mentorAuth(req, res, next) {
-  const token = req.headers['x-auth-token'];
-  if (!token) return res.status(401).json({ error: '未登录' });
-  const users = readObj('users.json');
-  const user = Object.values(users).find(u => u.token === token);
-  if (!user || (user.role !== 'mentor' && user.role !== 'admin')) return res.status(403).json({ error: '需要导师或管理员权限' });
-  req.currentUser = user;
-  next();
+async function mentorAuth(req, res, next) {
+  try {
+    const token = req.headers['x-auth-token'];
+    if (!token) return res.status(401).json({ error: '未登录' });
+    const users = await db.readObj('users.json');
+    const user = Object.values(users).find(u => u.token === token);
+    if (!user || (user.role !== 'mentor' && user.role !== 'admin')) return res.status(403).json({ error: '需要导师或管理员权限' });
+    req.currentUser = user;
+    next();
+  } catch(e) { next(e); }
 }
 
-function adminAuth(req, res, next) {
-  const token = req.headers['x-auth-token'];
-  if (!token) return res.status(401).json({ error: '未登录' });
-  const users = readObj('users.json');
-  const user = Object.values(users).find(u => u.token === token);
-  if (!user || user.role !== 'admin') return res.status(403).json({ error: '需要管理员权限' });
-  req.currentUser = user;
-  next();
+async function adminAuth(req, res, next) {
+  try {
+    const token = req.headers['x-auth-token'];
+    if (!token) return res.status(401).json({ error: '未登录' });
+    const users = await db.readObj('users.json');
+    const user = Object.values(users).find(u => u.token === token);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: '需要管理员权限' });
+    req.currentUser = user;
+    next();
+  } catch(e) { next(e); }
 }
 
 // ===== 题库加载 =====
@@ -477,13 +209,13 @@ const EXAM_CONFIGS = {
 };
 
 // ===== Fisher-Yates 洗牌 =====
-function getAllExams() {
+async function getAllExams() {
   const all = [];
   for (const panel of ['newbie', 'tech', 'sales', 'client']) {
     for (const exam of (EXAM_CONFIGS[panel] || [])) all.push({ ...exam });
   }
-  const config = getModuleConfig();
-  const meta = readObj('new_product_meta.json');
+  const config = await getModuleConfig();
+  const meta = await db.readObj('new_product_meta.json');
   // Fixed modules with bank assignments
   for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
     if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client') continue;
@@ -510,10 +242,10 @@ function getAllExams() {
   return all;
 }
 
-function getAllPanels() {
+async function getAllPanels() {
   const panels = ['newbie', 'tech', 'sales', 'client'];
-  const config = getModuleConfig();
-  const meta = readObj('new_product_meta.json');
+  const config = await getModuleConfig();
+  const meta = await db.readObj('new_product_meta.json');
   for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
     if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client') continue;
     if ((mod.bankIds || []).length > 0) panels.push(moduleId);
@@ -605,20 +337,20 @@ const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销
 // ====== API 路由 ======
 
 // 健康检查
-app.get('/api/health', (req, res) => {
-  res.json({ success: true, time: new Date().toISOString(), version: '2.1', panels: getAllPanels() });
+app.get('/api/health', async (req, res) => {
+  res.json({ success: true, time: new Date().toISOString(), version: '2.1', panels: await getAllPanels() });
 });
 
 // ===== 用户认证 API =====
 
 // 学员注册
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { username, password, name } = req.body;
   if (!username || !password || !name) return res.status(400).json({ error: '请填写用户名、密码和姓名' });
   if (username.length < 2 || username.length > 20) return res.status(400).json({ error: '用户名需2-20个字符' });
   if (password.length < 4) return res.status(400).json({ error: '密码至少4位' });
   
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   if (users[username]) return res.status(400).json({ error: '用户名已存在' });
   
   const token = generateToken();
@@ -629,16 +361,16 @@ app.post('/api/auth/register', (req, res) => {
     token,
     createdAt: new Date().toISOString()
   };
-  writeObj('users.json', users);
+  await db.writeObj('users.json', users);
   res.json({ success: true, user: { username, name: name.trim(), role: 'student', token } });
 });
 
 // 学员登录
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: '请输入用户名和密码' });
   
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   const user = users[username];
   if (!user) return res.status(401).json({ error: '用户名不存在' });
   if (user.password !== hashPassword(password)) return res.status(401).json({ error: '密码错误' });
@@ -646,41 +378,41 @@ app.post('/api/auth/login', (req, res) => {
   const token = generateToken();
   user.token = token;
   users[username] = user;
-  writeObj('users.json', users);
+  await db.writeObj('users.json', users);
   
   res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, token } });
 });
 
 // 获取当前用户信息
-app.get('/api/auth/me', authMiddleware, (req, res) => {
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const { password, ...safe } = req.currentUser;
   res.json({ success: true, user: safe });
 });
 
 // 修改密码
-app.put('/api/auth/password', authMiddleware, (req, res) => {
+app.put('/api/auth/password', authMiddleware, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   if (!oldPassword || !newPassword) return res.status(400).json({ error: '参数不完整' });
   if (newPassword.length < 4) return res.status(400).json({ error: '新密码至少4位' });
   
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   const user = users[req.currentUser.username];
   if (user.password !== hashPassword(oldPassword)) return res.status(400).json({ error: '原密码错误' });
   
   user.password = hashPassword(newPassword);
   users[req.currentUser.username] = user;
-  writeObj('users.json', users);
+  await db.writeObj('users.json', users);
   res.json({ success: true });
 });
 
 // ===== 管理员 API =====
 
 // 管理员创建导师账号
-app.post('/api/admin/mentors', adminAuth, (req, res) => {
+app.post('/api/admin/mentors', adminAuth, async (req, res) => {
   const { username, password, name } = req.body;
   if (!username || !password || !name) return res.status(400).json({ error: '参数不完整' });
   
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   if (users[username]) return res.status(400).json({ error: '用户名已存在' });
   
   users[username] = {
@@ -689,17 +421,17 @@ app.post('/api/admin/mentors', adminAuth, (req, res) => {
     role: 'mentor',
     createdAt: new Date().toISOString()
   };
-  writeObj('users.json', users);
+  await db.writeObj('users.json', users);
   res.json({ success: true, user: { username, name: name.trim(), role: 'mentor' } });
 });
 
 // 管理员获取所有用户列表
-app.get('/api/admin/users', adminAuth, (req, res) => {
-  const users = readObj('users.json');
+app.get('/api/admin/users', adminAuth, async (req, res) => {
+  const users = await db.readObj('users.json');
   const list = Object.values(users)
     .filter(u => u.username && u.role)
     .map(u => ({ username: u.username, name: u.name, role: u.role, createdAt: u.createdAt }));
-  const mentors = readObj('mentors.json');
+  const mentors = await db.readObj('mentors.json');
   // 附加导师-学员关系
   for (const u of list) {
     if (u.role === 'mentor') {
@@ -719,46 +451,46 @@ app.get('/api/admin/users', adminAuth, (req, res) => {
 });
 
 // 管理员删除用户
-app.delete('/api/admin/users/:username', adminAuth, (req, res) => {
+app.delete('/api/admin/users/:username', adminAuth, async (req, res) => {
   if (req.params.username === 'PC') return res.status(400).json({ error: '不能删除超级管理员' });
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   if (!users[req.params.username]) return res.status(404).json({ error: '用户不存在' });
   delete users[req.params.username];
-  writeObj('users.json', users);
+  await db.writeObj('users.json', users);
   res.json({ success: true });
 });
 
 // 管理员重置用户密码
-app.put('/api/admin/users/:username/reset-password', adminAuth, (req, res) => {
+app.put('/api/admin/users/:username/reset-password', adminAuth, async (req, res) => {
   const { newPassword } = req.body;
   if (!newPassword || newPassword.length < 4) return res.status(400).json({ error: '新密码至少4位' });
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   if (!users[req.params.username]) return res.status(404).json({ error: '用户不存在' });
   users[req.params.username].password = hashPassword(newPassword);
-  writeObj('users.json', users);
+  await db.writeObj('users.json', users);
   res.json({ success: true });
 });
 
 // 管理员分配学员给导师
-app.post('/api/admin/assign', adminAuth, (req, res) => {
+app.post('/api/admin/assign', adminAuth, async (req, res) => {
   const { mentorUsername, studentUsernames } = req.body;
   if (!mentorUsername || !studentUsernames || !Array.isArray(studentUsernames)) {
     return res.status(400).json({ error: '参数不完整' });
   }
-  const users = readObj('users.json');
+  const users = await db.readObj('users.json');
   if (!users[mentorUsername] || users[mentorUsername].role !== 'mentor') {
     return res.status(400).json({ error: '导师不存在' });
   }
-  const mentors = readObj('mentors.json');
+  const mentors = await db.readObj('mentors.json');
   mentors[mentorUsername] = studentUsernames.filter(s => users[s]);
-  writeObj('mentors.json', mentors);
+  await db.writeObj('mentors.json', mentors);
   res.json({ success: true, assigned: mentors[mentorUsername] });
 });
 
 // 管理员获取导师-学员分配关系
-app.get('/api/admin/assignments', adminAuth, (req, res) => {
-  const mentors = readObj('mentors.json');
-  const users = readObj('users.json');
+app.get('/api/admin/assignments', adminAuth, async (req, res) => {
+  const mentors = await db.readObj('mentors.json');
+  const users = await db.readObj('users.json');
   const list = [];
   for (const [mentor, students] of Object.entries(mentors)) {
     const mentorInfo = users[mentor];
@@ -775,16 +507,16 @@ app.get('/api/admin/assignments', adminAuth, (req, res) => {
 
 // ===== 考试配置 API =====
 
-app.get('/api/exams', (req, res) => {
+app.get('/api/exams', async (req, res) => {
   const panel = req.query.panel;
   if (panel && EXAM_CONFIGS[panel]) {
     return res.json({ success: true, exams: EXAM_CONFIGS[panel] });
   }
   if (panel) {
-    const config = getModuleConfig();
+    const config = await getModuleConfig();
     const mod = (config.fixedModules || {})[panel] || (config.customModules || {})[panel];
     if (mod) {
-      const meta = readObj('new_product_meta.json');
+      const meta = await db.readObj('new_product_meta.json');
       const exams = (mod.bankIds || []).map(bankId => {
         const m = meta[bankId];
         if (!m) return null;
@@ -798,39 +530,39 @@ app.get('/api/exams', (req, res) => {
     }
     return res.json({ success: true, exams: [] });
   }
-  res.json({ success: true, exams: getAllExams(), panels: getAllPanels() });
+  res.json({ success: true, exams: await getAllExams(), panels: await getAllPanels() });
 });
 
-app.get('/api/exams/:id', (req, res) => {
-  const exam = getAllExams().find(e => e.id === req.params.id);
+app.get('/api/exams/:id', async (req, res) => {
+  const exam = (await getAllExams()).find(e => e.id === req.params.id);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
   res.json({ success: true, exam });
 });
 
 // ===== 学员答题 API =====
 
-app.get('/api/records/:studentName', (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/records/:studentName', async (req, res) => {
+  const records = await db.readJSON('records.json');
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
   res.json({ success: true, records: studentRecords });
 });
 
-app.get('/api/attempts/:studentName', (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/attempts/:studentName', async (req, res) => {
+  const records = await db.readJSON('records.json');
   const attempts = {};
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
   for (const r of studentRecords) attempts[r.examId] = (attempts[r.examId] || 0) + 1;
   res.json({ success: true, attempts, maxAttempts: MAX_ATTEMPTS });
 });
 
-app.post('/api/start-exam', (req, res) => {
+app.post('/api/start-exam', async (req, res) => {
   const { studentName, examId } = req.body;
   if (!studentName || !examId) return res.status(400).json({ error: '参数不完整' });
   
-  const exam = getAllExams().find(e => e.id === examId);
+  const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
   
-  const records = readJSON('records.json');
+  const records = await db.readJSON('records.json');
   const attemptCount = records.filter(r => r.studentName === studentName && r.examId === examId).length;
   if (attemptCount >= MAX_ATTEMPTS) {
     const examRecords = records.filter(r => r.studentName === studentName && r.examId === examId);
@@ -865,11 +597,11 @@ app.post('/api/start-exam', (req, res) => {
   });
 });
 
-app.post('/api/records', (req, res) => {
+app.post('/api/records', async (req, res) => {
   const record = req.body;
   if (!record.studentName || !record.examId) return res.status(400).json({ error: '数据不完整' });
   
-  const records = readJSON('records.json');
+  const records = await db.readJSON('records.json');
   
   if (record.id) {
     const dupId = records.find(r => r.id === record.id);
@@ -916,7 +648,7 @@ app.post('/api/records', (req, res) => {
   record.mentorScored = false;
   
   records.push(record);
-  writeJSON('records.json', records);
+  await db.writeJSON('records.json', records);
   console.log('[records] New:', record.studentName, record.examId, 'score:', autoScore);
   res.json({ success: true, record });
 });
@@ -924,9 +656,9 @@ app.post('/api/records', (req, res) => {
 // ===== 导师/管理员 API =====
 
 // 获取可查看的学员列表（导师只看自己分配的学员，管理员看全部）
-app.get('/api/mentor/students', mentorAuth, (req, res) => {
-  const users = readObj('users.json');
-  const mentors = readObj('mentors.json');
+app.get('/api/mentor/students', mentorAuth, async (req, res) => {
+  const users = await db.readObj('users.json');
+  const mentors = await db.readObj('mentors.json');
   let students;
   if (req.currentUser.role === 'admin') {
     students = Object.values(users).filter(u => u.role === 'student').map(u => ({ username: u.username, name: u.name }));
@@ -941,17 +673,17 @@ app.get('/api/mentor/students', mentorAuth, (req, res) => {
 });
 
 // 获取答题记录（导师看自己学员的，管理员看全部）
-app.get('/api/mentor/records', mentorAuth, (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/mentor/records', mentorAuth, async (req, res) => {
+  const records = await db.readJSON('records.json');
   const { search, panel, student } = req.query;
   let filtered = records;
   
   if (req.currentUser.role !== 'admin') {
-    const mentors = readObj('mentors.json');
+    const mentors = await db.readObj('mentors.json');
     const assigned = mentors[req.currentUser.username] || [];
     const assignedNames = new Set();
     for (const s of assigned) {
-      const users = readObj('users.json');
+      const users = await db.readObj('users.json');
       const u = users[s];
       if (u) assignedNames.add(u.name);
     }
@@ -969,14 +701,14 @@ app.get('/api/mentor/records', mentorAuth, (req, res) => {
 });
 
 // 导出 CSV
-app.get('/api/mentor/records/export', mentorAuth, (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
+  const records = await db.readJSON('records.json');
   let filtered = records;
   
   if (req.currentUser.role !== 'admin') {
-    const mentors = readObj('mentors.json');
+    const mentors = await db.readObj('mentors.json');
     const assigned = mentors[req.currentUser.username] || [];
-    const users = readObj('users.json');
+    const users = await db.readObj('users.json');
     const assignedNames = new Set(assigned.map(s => { const u = users[s]; return u ? u.name : s; }));
     filtered = filtered.filter(r => assignedNames.has(r.studentName));
   }
@@ -987,7 +719,7 @@ app.get('/api/mentor/records/export', mentorAuth, (req, res) => {
   const panelLabels = PANEL_LABELS;
   const rows = [['学员姓名', '板块', '考试ID', '考试标题', '自动评分', '导师评分', '最终得分', '是否通过', '是否已评', '答题次数', '提交时间', '用时(秒)']];
   for (const r of filtered) {
-    const exam = getAllExams().find(e => e.id === r.examId);
+    const exam = (await getAllExams()).find(e => e.id === r.examId);
     rows.push([
       r.studentName,
       panelLabels[r.panel] || r.panel || '',
@@ -1016,8 +748,8 @@ app.get('/api/mentor/records/export', mentorAuth, (req, res) => {
 });
 
 // 学生查看自己的答题记录
-app.get('/api/student/records', authMiddleware, (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/student/records', authMiddleware, async (req, res) => {
+  const records = await db.readJSON('records.json');
   const studentName = req.currentUser.name;
   const filtered = records.filter(r => r.studentName === studentName);
   // 按时间倒序
@@ -1025,16 +757,16 @@ app.get('/api/student/records', authMiddleware, (req, res) => {
   res.json({ success: true, records: filtered, total: filtered.length });
 });
 
-app.get('/api/mentor/records/:id', mentorAuth, (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
+  const records = await db.readJSON('records.json');
   const record = records.find(r => r.id === req.params.id);
   if (!record) return res.status(404).json({ error: '记录不存在' });
   res.json({ success: true, record });
 });
 
-app.put('/api/mentor/records/:id/score', mentorAuth, (req, res) => {
+app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   const { mentorScore, finalScore, passed, mentorScored, mentorScoreDetails, questionScores, typeScores } = req.body;
-  const records = readJSON('records.json');
+  const records = await db.readJSON('records.json');
   const idx = records.findIndex(r => r.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '记录不存在' });
   if (mentorScore !== undefined) records[idx].mentorScore = mentorScore;
@@ -1044,12 +776,12 @@ app.put('/api/mentor/records/:id/score', mentorAuth, (req, res) => {
   if (mentorScoreDetails !== undefined) records[idx].mentorScoreDetails = mentorScoreDetails;
   if (questionScores !== undefined) records[idx].questionScores = questionScores;
   if (typeScores !== undefined) records[idx].typeScores = typeScores;
-  writeJSON('records.json', records);
+  await db.writeJSON('records.json', records);
   res.json({ success: true, record: records[idx] });
 });
 
-app.delete('/api/mentor/records/:id/score', mentorAuth, (req, res) => {
-  const records = readJSON('records.json');
+app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
+  const records = await db.readJSON('records.json');
   const idx = records.findIndex(r => r.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '记录不存在' });
   records[idx].mentorScore = null;
@@ -1057,32 +789,32 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, (req, res) => {
   records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
   records[idx].mentorScored = false;
   records[idx].mentorScoreDetails = null;
-  writeJSON('records.json', records);
+  await db.writeJSON('records.json', records);
   res.json({ success: true, record: records[idx] });
 });
 
-app.delete('/api/mentor/records/:id', mentorAuth, (req, res) => {
-  const records = readJSON('records.json');
+app.delete('/api/mentor/records/:id', mentorAuth, async (req, res) => {
+  const records = await db.readJSON('records.json');
   const idx = records.findIndex(r => r.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '记录不存在' });
   const deleted = records.splice(idx, 1)[0];
-  writeJSON('records.json', records);
+  await db.writeJSON('records.json', records);
   res.json({ success: true, deleted });
 });
 
-app.delete('/api/mentor/records', mentorAuth, (req, res) => {
-  const count = readJSON('records.json').length;
-  writeJSON('records.json', []);
+app.delete('/api/mentor/records', mentorAuth, async (req, res) => {
+  const count = await db.readJSON('records.json').length;
+  await db.writeJSON('records.json', []);
   res.json({ success: true, deletedCount: count });
 });
 
 // ===== 题库管理 =====
 
-app.get('/api/mentor/questions', mentorAuth, (req, res) => {
+app.get('/api/mentor/questions', mentorAuth, async (req, res) => {
   const panel = req.query.panel || 'all';
   const allQuestions = {};
-  const searchPanels = panel === 'all' ? getAllPanels() : [panel];
-  const allExams = getAllExams();
+  const searchPanels = panel === 'all' ? await getAllPanels() : [panel];
+  const allExams = await getAllExams();
   for (const p of searchPanels) {
     allQuestions[p] = [];
     const exams = allExams.filter(e => e.panel === p);
@@ -1096,10 +828,10 @@ app.get('/api/mentor/questions', mentorAuth, (req, res) => {
   res.json({ success: true, questions: allQuestions, exams: allExams });
 });
 
-app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, (req, res) => {
+app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, res) => {
   const { examId, questionId } = req.params;
   const updated = req.body;
-  const exam = getAllExams().find(e => e.id === examId);
+  const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
   const questions = loadQuestions(exam.questionFile);
   const idx = questions.findIndex(q => q.id === questionId);
@@ -1111,10 +843,10 @@ app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, (req, res) => {
   res.json({ success: true, question: questions[idx] });
 });
 
-app.post('/api/mentor/questions/:examId', mentorAuth, (req, res) => {
+app.post('/api/mentor/questions/:examId', mentorAuth, async (req, res) => {
   const { examId } = req.params;
   const newQ = req.body;
-  const exam = getAllExams().find(e => e.id === examId);
+  const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
   if (!newQ.id) newQ.id = examId + '_q' + Date.now();
   if (!newQ.points) newQ.points = 5;
@@ -1126,9 +858,9 @@ app.post('/api/mentor/questions/:examId', mentorAuth, (req, res) => {
   res.json({ success: true, question: newQ });
 });
 
-app.delete('/api/mentor/questions/:examId/:questionId', mentorAuth, (req, res) => {
+app.delete('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, res) => {
   const { examId, questionId } = req.params;
-  const exam = getAllExams().find(e => e.id === examId);
+  const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
   const questions = loadQuestions(exam.questionFile);
   const idx = questions.findIndex(q => q.id === questionId);
@@ -1143,13 +875,13 @@ app.delete('/api/mentor/questions/:examId/:questionId', mentorAuth, (req, res) =
 // ===== 新品日常考核管理 =====
 
 // 获取新品列表（所有登录用户可查看，但只有导师/管理员可管理）
-app.get('/api/admin/new-products', authMiddleware, (req, res) => {
-  const meta = readObj('new_product_meta.json');
+app.get('/api/admin/new-products', authMiddleware, async (req, res) => {
+  const meta = await db.readObj('new_product_meta.json');
   res.json({ success: true, products: Object.values(meta) });
 });
 
 // 创建新品考核（通过题库模板导入）
-app.post('/api/admin/new-products', mentorAuth, (req, res) => {
+app.post('/api/admin/new-products', mentorAuth, async (req, res) => {
   const { title, brand, questions } = req.body;
   if (!title || !questions || !Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: '请提供产品名称和题目列表' });
@@ -1172,33 +904,33 @@ app.post('/api/admin/new-products', mentorAuth, (req, res) => {
   const content = `// ${title} - 新品题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
   fs.writeFileSync(filePath, content, 'utf8');
   
-  const meta = readObj('new_product_meta.json');
+  const meta = await db.readObj('new_product_meta.json');
   meta[productId] = {
     id: productId, title, brand: brand || '新品',
     questionFile: fileName, questionCount: questions.length,
     distribution: { single: 8, multiple: 5, judge: 4, short: 1 },
     createdAt: new Date().toISOString()
   };
-  writeObj('new_product_meta.json', meta);
+  await db.writeObj('new_product_meta.json', meta);
   
   res.json({ success: true, product: meta[productId], questionCount: questions.length });
 });
 
 // 删除产品题库
-app.delete('/api/admin/new-products/:productId', mentorAuth, (req, res) => {
-  const meta = readObj('new_product_meta.json');
+app.delete('/api/admin/new-products/:productId', mentorAuth, async (req, res) => {
+  const meta = await db.readObj('new_product_meta.json');
   if (!meta[req.params.productId]) return res.status(404).json({ error: '新品不存在' });
   const product = meta[req.params.productId];
   // 删除题库文件
   const filePath = path.join(__dirname, 'questions', product.questionFile);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   delete meta[req.params.productId];
-  writeObj('new_product_meta.json', meta);
+  await db.writeObj('new_product_meta.json', meta);
   res.json({ success: true });
 });
 
 // 下载题库模板（Excel格式）
-app.get('/api/admin/question-template', mentorAuth, (req, res) => {
+app.get('/api/admin/question-template', mentorAuth, async (req, res) => {
   const format = req.query.format || 'xlsx';
 
   if (format === 'json') {
@@ -1298,7 +1030,7 @@ app.get('/api/admin/question-template', mentorAuth, (req, res) => {
 });
 
 // 导入新品题库（支持 Excel .xlsx 和 JSON）
-app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), (req, res) => {
+app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), async (req, res) => {
   const title = req.body.title;
   const brand = req.body.brand || '新品';
   if (!title) return res.status(400).json({ error: '请提供产品名称' });
@@ -1403,14 +1135,14 @@ app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), (r
   const content = `// ${title} - 新品题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
   fs.writeFileSync(filePath, content, 'utf8');
 
-  const meta = readObj('new_product_meta.json');
+  const meta = await db.readObj('new_product_meta.json');
   meta[productId] = {
     id: productId, title, brand: brand || '新品',
     questionFile: fileName, questionCount: questions.length,
     distribution: { single: 8, multiple: 5, judge: 4, short: 1 },
     createdAt: new Date().toISOString()
   };
-  writeObj('new_product_meta.json', meta);
+  await db.writeObj('new_product_meta.json', meta);
 
   res.json({ success: true, product: meta[productId], questionCount: questions.length });
 });
@@ -1418,59 +1150,59 @@ app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), (r
 // ===== 模块管理 API =====
 
 // 获取所有模块和产品题库
-app.get('/api/admin/modules', authMiddleware, (req, res) => {
-  const config = getModuleConfig();
-  const meta = readObj('new_product_meta.json');
+app.get('/api/admin/modules', authMiddleware, async (req, res) => {
+  const config = await getModuleConfig();
+  const meta = await db.readObj('new_product_meta.json');
   res.json({ success: true, fixedModules: config.fixedModules, customModules: config.customModules, products: Object.values(meta) });
 });
 
 // 创建自定义模块
-app.post('/api/admin/modules', mentorAuth, (req, res) => {
+app.post('/api/admin/modules', mentorAuth, async (req, res) => {
   const { name, icon, desc } = req.body;
   if (!name) return res.status(400).json({ error: '请提供模块名称' });
-  const config = getModuleConfig();
+  const config = await getModuleConfig();
   const id = 'custom_' + Date.now();
   config.customModules[id] = { id, name, icon: icon || '📋', desc: desc || '', bankIds: [] };
-  writeObj('module_config.json', config);
+  await db.writeObj('module_config.json', config);
   res.json({ success: true, module: config.customModules[id] });
 });
 
 // 删除自定义模块
-app.delete('/api/admin/modules/:moduleId', mentorAuth, (req, res) => {
-  const config = getModuleConfig();
+app.delete('/api/admin/modules/:moduleId', mentorAuth, async (req, res) => {
+  const config = await getModuleConfig();
   if (config.customModules[req.params.moduleId]) {
     delete config.customModules[req.params.moduleId];
-    writeObj('module_config.json', config);
+    await db.writeObj('module_config.json', config);
     return res.json({ success: true });
   }
   res.status(404).json({ error: '模块不存在或不可删除固定模块' });
 });
 
 // 更新模块（分配产品题库、修改名称等）
-app.put('/api/admin/modules/:moduleId', mentorAuth, (req, res) => {
+app.put('/api/admin/modules/:moduleId', mentorAuth, async (req, res) => {
   const { bankIds, name, icon, desc } = req.body;
-  const config = getModuleConfig();
+  const config = await getModuleConfig();
   const mod = (config.fixedModules || {})[req.params.moduleId] || (config.customModules || {})[req.params.moduleId];
   if (!mod) return res.status(404).json({ error: '模块不存在' });
   if (bankIds !== undefined) mod.bankIds = bankIds;
   if (name !== undefined) mod.name = name;
   if (icon !== undefined) mod.icon = icon;
   if (desc !== undefined) mod.desc = desc;
-  writeObj('module_config.json', config);
+  await db.writeObj('module_config.json', config);
   res.json({ success: true, module: mod });
 });
 
 // ===== 查缺补漏看板 =====
 
-app.get('/api/mentor/weak-areas', mentorAuth, (req, res) => {
+app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
   const studentName = req.query.student;
-  const records = readJSON('records.json');
+  const records = await db.readJSON('records.json');
   let filtered = records;
   
   if (req.currentUser.role !== 'admin') {
-    const mentors = readObj('mentors.json');
+    const mentors = await db.readObj('mentors.json');
     const assigned = mentors[req.currentUser.username] || [];
-    const users = readObj('users.json');
+    const users = await db.readObj('users.json');
     const assignedNames = new Set(assigned.map(s => { const u = users[s]; return u ? u.name : s; }));
     filtered = filtered.filter(r => assignedNames.has(r.studentName));
   }
@@ -1516,8 +1248,8 @@ app.get('/api/mentor/weak-areas', mentorAuth, (req, res) => {
   res.json({ success: true, students: result, totalStudents: result.length });
 });
 
-app.get('/api/mentor/weak-areas/:studentName', mentorAuth, (req, res) => {
-  const records = readJSON('records.json');
+app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
+  const records = await db.readJSON('records.json');
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
   const allWrong = [];
   for (const r of studentRecords) {
@@ -1541,69 +1273,31 @@ app.get('/api/mentor/weak-areas/:studentName', mentorAuth, (req, res) => {
 });
 
 // 重置学员尝试次数
-app.post('/api/mentor/reset-attempts', mentorAuth, (req, res) => {
+app.post('/api/mentor/reset-attempts', mentorAuth, async (req, res) => {
   const { studentName, examId } = req.body;
-  const records = readJSON('records.json');
+  const records = await db.readJSON('records.json');
   const toRemove = records.filter(r => {
     if (studentName && r.studentName !== studentName) return false;
     if (examId && r.examId !== examId) return false;
     return true;
   });
   const remaining = records.filter(r => !toRemove.includes(r));
-  writeJSON('records.json', remaining);
+  await db.writeJSON('records.json', remaining);
   res.json({ success: true, removedCount: toRemove.length });
 });
 
-// ===== 优雅关闭：刷写数据到 GitHub =====
-let shuttingDown = false;
-async function gracefulShutdown(signal) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`[server] ${signal} received, flushing data to GitHub...`);
-  clearTimeout(persistTimer);
-  try {
-    // 强制标记所有文件为待同步并立即执行
-    const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
-    for (const f of dataFiles) persistQueue.add(f);
-    persistRunning = false;
-    await runPersist();
-    console.log('[server] Data flushed successfully.');
-  } catch(e) {
-    console.error('[server] Flush failed:', e.message);
-  }
-  process.exit(0);
-}
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// ===== 定期同步：每 5 分钟确保数据已同步到 GitHub =====
-// 首次延迟 60 秒，避免启动时覆盖远程数据
-let syncInterval = null;
-setTimeout(() => {
-  syncInterval = setInterval(() => {
-    const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
-    for (const f of dataFiles) persistQueue.add(f);
-    runPersist().catch(e => console.error('[sync] Periodic sync failed:', e.message));
-  }, 300000); // 5 分钟
-}, 60000); // 首次延迟 60 秒
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  // 启动完成，现在允许持久化
-  startupComplete = true;
-  console.log(`[server] Quiz System V3 running on port ${PORT}`);
-  console.log(`[server] Startup complete — persistence enabled.`);
-  console.log(`[server] Panels: ${getAllPanels().join(', ')}`);
-  console.log(`[server] Passing score: ${PASSING_SCORE}, Max attempts: ${MAX_ATTEMPTS}`);
-  let totalQ = 0;
-  for (const exam of getAllExams()) {
-    try { totalQ += loadQuestions(exam.questionFile).length; } catch(e) {}
-  }
-  console.log(`[server] Total questions loaded: ${totalQ}`);
-  // 启动后 5 秒做首次同步
-  setTimeout(() => {
-    const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
-    for (const f of dataFiles) persistQueue.add(f);
-    runPersist().catch(e => console.error('[sync] Initial sync failed:', e.message));
-  }, 5000);
+(async () => {
+  await db.init();
+  await initSuperAdmin();
+  await initModuleConfig();
+  
+  app.listen(PORT, () => {
+    console.log(`[server] Quiz System V3 running on port ${PORT}`);
+    console.log(`[server] Database: Supabase PostgreSQL (cloud)`);
+    console.log(`[server] Passing score: ${PASSING_SCORE}, Max attempts: ${MAX_ATTEMPTS}`);
+  });
+})().catch(e => {
+  console.error('[server] Startup failed:', e);
+  process.exit(1);
 });
