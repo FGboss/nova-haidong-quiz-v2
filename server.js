@@ -268,23 +268,65 @@ function shuffle(arr) {
 
 function pickQuestions(bank, config, examId) {
   const dist = config.distribution;
+  const totalNeed = config.totalQuestions || Object.values(dist).reduce((a,b)=>a+b, 0);
+  const replaceCount = config.replaceCount || 0;
   const result = [];
+  
+  // 过滤该考试专属题目
   let pool = bank;
   if (examId) {
     const filtered = bank.filter(q => q.examId === examId);
     if (filtered.length > 0) pool = filtered;
   }
+  
   const byType = { single: [], multiple: [], judge: [], short: [] };
   for (const q of pool) {
     const t = q.type || 'single';
     if (byType[t]) byType[t].push(q);
   }
+  
+  // 全量题库（用于补充替换题目）
+  const fullByType = { single: [], multiple: [], judge: [], short: [] };
+  for (const q of bank) {
+    const t = q.type || 'single';
+    if (fullByType[t]) fullByType[t].push(q);
+  }
+  
+  // 已选题目的 ID 集合（防止重复）
+  const pickedIds = new Set();
+  
   for (const type of TYPE_ORDER) {
     const need = dist[type] || 0;
     const typePool = byType[type] || [];
+    const fullTypePool = fullByType[type] || [];
+    
     if (typePool.length === 0) continue;
+    
+    // 第一步：从过滤池中随机选 need 题
     const shuffled = shuffle(typePool);
     const picked = shuffled.slice(0, Math.min(need, shuffled.length));
+    for (const q of picked) pickedIds.add(q.id);
+    
+    // 第二步：如果有 replaceCount，从全量题库中随机替换部分题目
+    if (replaceCount > 0 && fullTypePool.length > need) {
+      const replaceRatio = need / totalNeed; // 按比例分配替换名额
+      const toReplace = Math.max(1, Math.round(replaceCount * replaceRatio));
+      const replaceCountForType = Math.min(toReplace, picked.length);
+      
+      // 从未被选中的全量题库中随机抽替换题
+      const candidates = shuffle(fullTypePool.filter(q => !pickedIds.has(q.id)));
+      const replacements = candidates.slice(0, replaceCountForType);
+      
+      // 执行替换：随机替换掉 picked 中的部分题目
+      const replaceIndices = shuffle([...Array(picked.length).keys()]).slice(0, replacements.length);
+      for (let i = 0; i < replacements.length && i < replaceIndices.length; i++) {
+        const oldId = picked[replaceIndices[i]].id;
+        pickedIds.delete(oldId);
+        picked[replaceIndices[i]] = replacements[i];
+        pickedIds.add(replacements[i].id);
+      }
+    }
+    
     for (const q of picked) result.push({ ...q, _type: type });
   }
   if (result.length < config.totalQuestions) {
@@ -619,15 +661,23 @@ app.post('/api/records', async (req, res) => {
   const questionScores = {};
   const typeScores = { single: { score: 0, max: 0 }, multiple: { score: 0, max: 0 }, judge: { score: 0, max: 0 }, short: { score: 0, max: 0 } };
   
+  // 归一化答案格式：数组→排序字符串，布尔→A/B，字符串→原样
+  function normalizeAns(ans) {
+    if (ans === null || ans === undefined) return '';
+    if (Array.isArray(ans)) return ans.map(String).sort().join('');
+    if (typeof ans === 'boolean') return ans ? 'A' : 'B';
+    return String(ans);
+  }
+  
   for (const q of questions) {
     const qType = q.type || q._type || 'single';
     const points = q.points || 5;
     const userAnswer = (record.answers || {})[q.id];
     let score = 0;
     if (qType === 'single' || qType === 'judge') {
-      score = (userAnswer === q.answer) ? points : 0;
+      score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
     } else if (qType === 'multiple') {
-      score = (String(userAnswer || '') === String(q.answer || '')) ? points : 0;
+      score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
     } else if (qType === 'short') {
       score = gradeShortAnswer(userAnswer, q.keywords, points);
     }
