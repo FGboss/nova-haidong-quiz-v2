@@ -1672,5 +1672,58 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "评分调试",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "qdebug": "ABCD"
+    },
+    "questions": [
+      {
+        "id": "qdebug",
+        "type": "multiple",
+        "question": "调试",
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "points": 7
+      }
+    ],
+    "timeSpent": 99,
+    "id": "r_1787042526801_ue7adx",
+    "submitTime": "2026-08-18T08:42:06.801Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "qdebug": {
+        "score": 0,
+        "maxScore": 7
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 7
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
