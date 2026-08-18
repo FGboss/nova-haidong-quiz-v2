@@ -1778,5 +1778,58 @@
       }
     },
     "mentorScored": false
+  },
+  {
+    "studentName": "v2test",
+    "examId": "w1d1",
+    "panel": "newbie",
+    "answers": {
+      "v2q": "ABCD"
+    },
+    "questions": [
+      {
+        "id": "v2q",
+        "type": "multiple",
+        "question": "t",
+        "answer": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "points": 7
+      }
+    ],
+    "timeSpent": 300,
+    "id": "r_1787042830079_pdc34u",
+    "submitTime": "2026-08-18T08:47:10.079Z",
+    "autoScore": 0,
+    "finalScore": 0,
+    "passed": false,
+    "questionScores": {
+      "v2q": {
+        "score": 0,
+        "maxScore": 7
+      }
+    },
+    "typeScores": {
+      "single": {
+        "score": 0,
+        "max": 0
+      },
+      "multiple": {
+        "score": 0,
+        "max": 7
+      },
+      "judge": {
+        "score": 0,
+        "max": 0
+      },
+      "short": {
+        "score": 0,
+        "max": 0
+      }
+    },
+    "mentorScored": false
   }
 ]
