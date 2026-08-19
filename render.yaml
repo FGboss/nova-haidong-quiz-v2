@@ -7,6 +7,7 @@ services:
     plan: free
     healthCheckPath: /api/health
     autoDeploy: true
+    # V2.3 - 2026-08-19: 内存缓存+Supabase回退修复
     envVars:
       - key: NODE_ENV
         value: production
