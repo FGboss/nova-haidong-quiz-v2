@@ -134,7 +134,11 @@ async function adminAuth(req, res, next) {
 // ===== 题库加载 =====
 function loadQuestions(filePath) {
   const fullPath = path.join(__dirname, 'questions', filePath);
-  if (!fs.existsSync(fullPath)) return [];
+  if (!fs.existsSync(fullPath)) {
+    // 尝试从 Supabase 恢复
+    console.log('[questions] File not found on disk, trying Supabase:', filePath);
+    return [];
+  }
   try {
     const content = fs.readFileSync(fullPath, 'utf8');
     const match = content.match(/const\s+\w+\s*=\s*(\[[\s\S]*\]);?\s*$/m);
@@ -143,6 +147,41 @@ function loadQuestions(filePath) {
     if (m) return eval(m[1]);
     return [];
   } catch(e) { console.error('[questions] Load error:', filePath, e.message); return []; }
+}
+
+// 异步加载题库（支持 Supabase 回退）
+async function loadQuestionsAsync(filePath) {
+  const questions = loadQuestions(filePath);
+  if (questions.length > 0) return questions;
+  
+  // 本地文件不存在，尝试从 Supabase 恢复
+  const key = 'question_file_' + filePath.replace(/\//g, '_');
+  try {
+    const data = await db.readJSON(key);
+    if (data && data.length > 0) {
+      console.log('[questions] Restored from Supabase:', filePath, `(${data.length} questions)`);
+      // 恢复本地文件
+      const fullPath = path.join(__dirname, 'questions', filePath);
+      const dir = path.dirname(fullPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const varName = 'QUESTIONS_' + path.basename(filePath, '.js');
+      const content = `// Restored from Supabase\nconst ${varName} = ${JSON.stringify(data, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
+      fs.writeFileSync(fullPath, content, 'utf8');
+      return data;
+    }
+  } catch(e) {
+    console.error('[questions] Supabase restore error:', filePath, e.message);
+  }
+  return [];
+}
+
+// 保存题库到 Supabase（用于备份）
+async function saveQuestionsToSupabase(filePath) {
+  const questions = loadQuestions(filePath);
+  if (questions.length === 0) return;
+  const key = 'question_file_' + filePath.replace(/\//g, '_');
+  await db.writeJSON(key, questions);
+  console.log('[questions] Saved to Supabase:', filePath, `(${questions.length} questions)`);
 }
 
 function readQuestionFile(exam) {
@@ -1193,6 +1232,9 @@ app.post('/api/admin/new-products/import', mentorAuth, upload.single('file'), as
   const content = `// ${title} - 新品题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
   fs.writeFileSync(filePath, content, 'utf8');
 
+  // 同时保存到 Supabase 作为备份
+  await saveQuestionsToSupabase(fileName);
+
   const meta = await db.readObj('new_product_meta.json');
   meta[productId] = {
     id: productId, title, brand: brand || '新品',
@@ -1344,11 +1386,35 @@ app.post('/api/mentor/reset-attempts', mentorAuth, async (req, res) => {
   res.json({ success: true, removedCount: toRemove.length });
 });
 
+// ===== 从 Supabase 恢复题库文件（启动时） =====
+async function restoreQuestionsFromSupabase() {
+  const meta = await db.readObj('new_product_meta.json');
+  let restored = 0;
+  for (const [productId, product] of Object.entries(meta)) {
+    if (!product.questionFile) continue;
+    const fullPath = path.join(__dirname, 'questions', product.questionFile);
+    if (fs.existsSync(fullPath)) continue; // 文件已存在，跳过
+    const key = 'question_file_' + product.questionFile.replace(/\//g, '_');
+    const data = await db.readJSON(key);
+    if (data && data.length > 0) {
+      const dir = path.dirname(fullPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const varName = 'QUESTIONS_' + productId;
+      const content = `// Restored from Supabase\nconst ${varName} = ${JSON.stringify(data, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
+      fs.writeFileSync(fullPath, content, 'utf8');
+      restored++;
+      console.log('[restore] Restored question file:', product.questionFile, `(${data.length} questions)`);
+    }
+  }
+  if (restored > 0) console.log(`[restore] Total restored: ${restored} files`);
+}
+
 const PORT = process.env.PORT || 3000;
 (async () => {
   await db.init();
   await initSuperAdmin();
   await initModuleConfig();
+  await restoreQuestionsFromSupabase();
   
   app.listen(PORT, () => {
     console.log(`[server] Quiz System V3 running on port ${PORT}`);

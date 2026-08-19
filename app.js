@@ -1174,7 +1174,7 @@ function renderQBankContent(){
                   <span style="font-size:11px;color:var(--text-sec);margin-left:4px">ID: ${escapeHtml(q.id)}</span>
                   <div style="font-weight:600;margin-top:4px">${i+1}. ${escapeHtml(q.question)}</div>
                   ${q.options ? `<div style="font-size:13px;color:var(--text-sec);margin-top:4px">选项：${q.options.map(o => escapeHtml(o)).join(' / ')}</div>` : ''}
-                  <div style="font-size:12px;margin-top:4px;color:var(--success)">答案：${escapeHtml(q.answer||'')} ${q.keywords ? '| 关键词：'+escapeHtml(q.keywords) : ''}</div>
+                  <div style="font-size:12px;margin-top:4px;color:var(--success)">答案：${q.type==='judge' ? (q.answer==='A'||q.answer===true?'对':'错') : escapeHtml(q.answer||'')} ${q.keywords ? '| 关键词：'+escapeHtml(q.keywords) : ''}</div>
                   ${q.explanation ? `<div style="font-size:12px;color:var(--text-sec);margin-top:2px">解析：${escapeHtml(q.explanation)}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:4px;flex-shrink:0">
@@ -1230,7 +1230,7 @@ async function openEditQuestion(panel, examId, questionId){
         </div>
         <div class="form-group">
           <label class="form-label">正确答案</label>
-          <input class="form-input" id="editAnswer" value="${escapeHtml(q.answer||'')}">
+          <input class="form-input" id="editAnswer" value="${q.type==='judge' ? (q.answer==='A'||q.answer===true?'对':'错') : escapeHtml(q.answer||'')}">
         </div>
         <div class="form-group">
           <label class="form-label">简答关键词（逗号分隔）</label>
@@ -1257,12 +1257,17 @@ async function saveEditQuestion(panel, examId, questionId){
   const type = $('#editType').value;
   const question = $('#editQuestion').value.trim();
   const optionsStr = $('#editOptions').value.trim();
-  const answer = $('#editAnswer').value.trim();
+  let answer = $('#editAnswer').value.trim();
   const keywords = $('#editKeywords').value.trim();
   const points = parseInt($('#editPoints').value) || 5;
   const explanation = $('#editExplain').value.trim();
   if (!question){ showToast('请输入题目内容','error'); return; }
   if (!answer){ showToast('请输入正确答案','error'); return; }
+  // 判断题答案转换：对/错 → A/B
+  if (type === 'judge') {
+    if (answer === '对' || answer === '正确') answer = 'A';
+    else if (answer === '错' || answer === '错误') answer = 'B';
+  }
   const options = optionsStr ? optionsStr.split('\n').filter(Boolean) : [];
   try {
     const res = await api(`/api/mentor/questions/${examId}/${questionId}`, {
@@ -1332,12 +1337,17 @@ async function saveAddQuestion(panel, examId){
   const type = $('#addType').value;
   const question = $('#addQuestion').value.trim();
   const optionsStr = $('#addOptions').value.trim();
-  const answer = $('#addAnswer').value.trim();
+  let answer = $('#addAnswer').value.trim();
   const keywords = $('#addKeywords').value.trim();
   const points = parseInt($('#addPoints').value) || 5;
   const explanation = $('#addExplain').value.trim();
   if (!question){ showToast('请输入题目内容','error'); return; }
   if (!answer){ showToast('请输入正确答案','error'); return; }
+  // 判断题答案转换：对/错 → A/B
+  if (type === 'judge') {
+    if (answer === '对' || answer === '正确') answer = 'A';
+    else if (answer === '错' || answer === '错误') answer = 'B';
+  }
   const options = optionsStr ? optionsStr.split('\n').filter(Boolean) : [];
   try {
     const res = await api(`/api/mentor/questions/${examId}`, {
