@@ -131,54 +131,73 @@ async function adminAuth(req, res, next) {
   } catch(e) { next(e); }
 }
 
-// ===== 题库加载 =====
+// ===== 题库加载（内存缓存 + Supabase 回退，确保数据不丢） =====
+const questionCache = new Map(); // 内存缓存，文件丢失时作为首要回退
+
 function loadQuestions(filePath) {
   const fullPath = path.join(__dirname, 'questions', filePath);
   if (!fs.existsSync(fullPath)) {
-    // 尝试从 Supabase 恢复
-    console.log('[questions] File not found on disk, trying Supabase:', filePath);
+    // 内存缓存回退（从 Supabase 预加载的）
+    if (questionCache.has(filePath)) {
+      console.log('[questions] Served from memory cache:', filePath, `(${questionCache.get(filePath).length} questions)`);
+      return questionCache.get(filePath);
+    }
+    console.log('[questions] File not found on disk:', filePath);
     return [];
   }
   try {
     const content = fs.readFileSync(fullPath, 'utf8');
     const match = content.match(/const\s+\w+\s*=\s*(\[[\s\S]*\]);?\s*$/m);
-    if (match) return eval(match[1]);
+    if (match) {
+      const questions = eval(match[1]);
+      questionCache.set(filePath, questions); // 更新缓存
+      return questions;
+    }
     const m = content.match(/module\.exports\s*=\s*(\[[\s\S]*\]);?\s*$/m);
-    if (m) return eval(m[1]);
+    if (m) {
+      const questions = eval(m[1]);
+      questionCache.set(filePath, questions);
+      return questions;
+    }
     return [];
   } catch(e) { console.error('[questions] Load error:', filePath, e.message); return []; }
 }
 
-// 异步加载题库（支持 Supabase 回退）
-async function loadQuestionsAsync(filePath) {
-  const questions = loadQuestions(filePath);
-  if (questions.length > 0) return questions;
-  
-  // 本地文件不存在，尝试从 Supabase 恢复
-  const key = 'question_file_' + filePath.replace(/\//g, '_');
-  try {
-    const data = await db.readJSON(key);
-    if (data && data.length > 0) {
-      console.log('[questions] Restored from Supabase:', filePath, `(${data.length} questions)`);
-      // 恢复本地文件
-      const fullPath = path.join(__dirname, 'questions', filePath);
-      const dir = path.dirname(fullPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const varName = 'QUESTIONS_' + path.basename(filePath, '.js');
-      const content = `// Restored from Supabase\nconst ${varName} = ${JSON.stringify(data, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
-      fs.writeFileSync(fullPath, content, 'utf8');
-      return data;
+// 从 Supabase 预加载所有题库到内存缓存（启动时调用）
+async function preloadQuestionCache() {
+  const meta = await db.readObj('new_product_meta.json');
+  let loaded = 0;
+  for (const [productId, product] of Object.entries(meta)) {
+    if (!product.questionFile) continue;
+    const filePath = product.questionFile;
+    const key = 'question_file_' + filePath.replace(/\//g, '_');
+    try {
+      const data = await db.readJSON(key);
+      if (data && data.length > 0) {
+        questionCache.set(filePath, data);
+        loaded++;
+        console.log('[cache] Preloaded from Supabase:', filePath, `(${data.length} questions)`);
+      }
+    } catch(e) {
+      console.error('[cache] Preload error:', filePath, e.message);
     }
-  } catch(e) {
-    console.error('[questions] Supabase restore error:', filePath, e.message);
   }
-  return [];
+  if (loaded > 0) console.log(`[cache] Total preloaded: ${loaded} question files`);
 }
 
-// 保存题库到 Supabase（用于备份）
+// 同步缓存 + Supabase 备份（任何题目修改后调用）
+async function syncQuestionCache(filePath, questions) {
+  questionCache.set(filePath, questions);
+  const key = 'question_file_' + filePath.replace(/\//g, '_');
+  await db.writeJSON(key, questions);
+  console.log('[cache] Synced to Supabase:', filePath, `(${questions.length} questions)`);
+}
+
+// 保存题库到 Supabase（导入时调用）
 async function saveQuestionsToSupabase(filePath) {
   const questions = loadQuestions(filePath);
   if (questions.length === 0) return;
+  questionCache.set(filePath, questions);
   const key = 'question_file_' + filePath.replace(/\//g, '_');
   await db.writeJSON(key, questions);
   console.log('[questions] Saved to Supabase:', filePath, `(${questions.length} questions)`);
@@ -937,6 +956,7 @@ app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, res
   const varName = 'QUESTIONS_' + examId;
   const content = `// ${exam.title} - 题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
   writeQuestionFile(exam, content);
+  await syncQuestionCache(exam.questionFile, questions); // 同步到 Supabase
   res.json({ success: true, question: questions[idx] });
 });
 
@@ -952,6 +972,7 @@ app.post('/api/mentor/questions/:examId', mentorAuth, async (req, res) => {
   const varName = 'QUESTIONS_' + examId;
   const content = `// ${exam.title} - 题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
   writeQuestionFile(exam, content);
+  await syncQuestionCache(exam.questionFile, questions); // 同步到 Supabase
   res.json({ success: true, question: newQ });
 });
 
@@ -966,6 +987,7 @@ app.delete('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, 
   const varName = 'QUESTIONS_' + examId;
   const content = `// ${exam.title} - 题库\n// 共 ${questions.length} 题\nconst ${varName} = ${JSON.stringify(questions, null, 2)};\n\nif (typeof module !== 'undefined' && module.exports) {\n  module.exports = ${varName};\n}\n`;
   writeQuestionFile(exam, content);
+  await syncQuestionCache(exam.questionFile, questions); // 同步到 Supabase
   res.json({ success: true, deleted });
 });
 
@@ -1393,10 +1415,14 @@ async function restoreQuestionsFromSupabase() {
   for (const [productId, product] of Object.entries(meta)) {
     if (!product.questionFile) continue;
     const fullPath = path.join(__dirname, 'questions', product.questionFile);
-    if (fs.existsSync(fullPath)) continue; // 文件已存在，跳过
     const key = 'question_file_' + product.questionFile.replace(/\//g, '_');
     const data = await db.readJSON(key);
     if (data && data.length > 0) {
+      // 确保缓存有数据
+      if (!questionCache.has(product.questionFile)) {
+        questionCache.set(product.questionFile, data);
+      }
+      if (fs.existsSync(fullPath)) continue; // 文件已存在，跳过
       const dir = path.dirname(fullPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const varName = 'QUESTIONS_' + productId;
@@ -1414,7 +1440,8 @@ const PORT = process.env.PORT || 3000;
   await db.init();
   await initSuperAdmin();
   await initModuleConfig();
-  await restoreQuestionsFromSupabase();
+  await preloadQuestionCache();   // 从 Supabase 预加载题库到内存缓存
+  await restoreQuestionsFromSupabase(); // 恢复本地文件
   
   app.listen(PORT, () => {
     console.log(`[server] Quiz System V3 running on port ${PORT}`);
