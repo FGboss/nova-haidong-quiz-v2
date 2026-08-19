@@ -1,11 +1,12 @@
 {
   "name": "nova-haidong-quiz-v2",
-  "version": "2.0.0",
-  "description": "诺瓦&嗨动 产品培训考核系统 V2 — 三大板块：新人专项 / 技术进阶 / 销售进阶",
+  "version": "2.3.0",
+  "description": "诺瓦&嗨动 产品培训考核系统 V3 — 内存缓存+Supabase回退，题库数据零丢失",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build": "npm install"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
