@@ -67,6 +67,7 @@ async function initModuleConfig() {
   const config = await db.readObj('module_config.json');
   const defaults = {
     newbie: { id: 'newbie', name: '新人专项', icon: '📚', desc: '3周系统培训考核，每日一考+周考，15套试卷覆盖产品基础知识', bankIds: [] },
+    training: { id: 'training', name: '新人培训专项（祥雨/伟桀）', icon: '🎓', desc: '嗨动产品线新人培训考核，5大产品系列，按百分比评分+随机出题', bankIds: [] },
     tech: { id: 'tech', name: '技术进阶', icon: '🔧', desc: '按产品系列深度考核，涵盖参数、性能、技术排查和系统架构', bankIds: [] },
     sales: { id: 'sales', name: '销售进阶', icon: '💼', desc: '按产品系列考核，侧重方案搭配、选型推荐和场景应用能力', bankIds: [] },
     client: { id: 'client', name: '客户端考核', icon: '🏢', desc: '客户现场培训考核，按产品系列出题，模拟纸质试卷模式', bankIds: [] },
@@ -205,20 +206,27 @@ const EXAM_CONFIGS = {
     { id: 'client_hd_audio', title: '嗨动 音频扩声系统', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_audio.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
     { id: 'client_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_multimedia.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
     { id: 'client_comprehensive', title: '全系列产品综合考核', panel: 'client', brand: '综合', duration: 60, questionFile: 'client/comprehensive.js', totalQuestions: 25, replaceCount: 8, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
+  ],
+  training: [
+    { id: 'tr_lcd',   title: 'LCD液晶拼接', panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/lcd.js',   totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_media', title: '媒体服务器',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/media.js', totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_audio', title: '音频系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/audio.js', totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_ctrl',  title: '中控系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/ctrl.js',  totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_viz',   title: '可视化系统',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/viz.js',   totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
   ]
 };
 
 // ===== Fisher-Yates 洗牌 =====
 async function getAllExams() {
   const all = [];
-  for (const panel of ['newbie', 'tech', 'sales', 'client']) {
+  for (const panel of ['newbie', 'tech', 'sales', 'client', 'training']) {
     for (const exam of (EXAM_CONFIGS[panel] || [])) all.push({ ...exam });
   }
   const config = await getModuleConfig();
   const meta = await db.readObj('new_product_meta.json');
   // Fixed modules with bank assignments
   for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
-    if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client') continue;
+    if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client' || moduleId === 'training') continue;
     for (const bankId of (mod.bankIds || [])) {
       const m = meta[bankId];
       if (m) all.push({
@@ -243,11 +251,11 @@ async function getAllExams() {
 }
 
 async function getAllPanels() {
-  const panels = ['newbie', 'tech', 'sales', 'client'];
+  const panels = ['newbie', 'tech', 'sales', 'client', 'training'];
   const config = await getModuleConfig();
   const meta = await db.readObj('new_product_meta.json');
   for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
-    if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client') continue;
+    if (moduleId === 'newbie' || moduleId === 'tech' || moduleId === 'sales' || moduleId === 'client' || moduleId === 'training') continue;
     if ((mod.bankIds || []).length > 0) panels.push(moduleId);
   }
   for (const [moduleId, mod] of Object.entries(config.customModules || {})) {

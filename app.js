@@ -5,11 +5,12 @@
 const API_BASE = window.location.origin;
 const PASSING_SCORE = 95;
 const MAX_ATTEMPTS = 10;
-const PANEL_LABELS = { newbie:'新人专项', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核' };
-const PANEL_COLORS = { newbie:'newbie', tech:'tech', sales:'sales', client:'client', new_product:'new-product' };
-const PANEL_ICONS = { newbie:'📚', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕' };
+const PANEL_LABELS = { newbie:'新人专项', training:'新人培训专项（祥雨/伟桀）', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核' };
+const PANEL_COLORS = { newbie:'newbie', training:'training', tech:'tech', sales:'sales', client:'client', new_product:'new-product' };
+const PANEL_ICONS = { newbie:'📚', training:'🎓', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕' };
 const PANEL_DESCS = {
   newbie:'3周系统培训考核，每日一考+周考，15套试卷覆盖产品基础知识',
+  training:'嗨动产品线新人培训考核，5大产品系列，按百分比评分+随机出题',
   tech:'按产品系列深度考核，涵盖参数、性能、技术排查和系统架构',
   sales:'按产品系列考核，侧重方案搭配、选型推荐和场景应用能力',
   client:'客户现场培训考核，按产品系列出题，模拟纸质试卷模式',
@@ -252,7 +253,7 @@ async function renderHome(app){
   } catch(e) { console.error('load modules:', e); }
 
   // Build panel list
-  const fixedPanels = ['newbie', 'tech', 'sales', 'client'];
+  const fixedPanels = ['newbie', 'training', 'tech', 'sales', 'client'];
   const dynamicPanels = [];
   for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
     if (fixedPanels.includes(id)) continue;
@@ -291,14 +292,15 @@ async function renderHome(app){
 }
 
 function renderPanelCard(panel){
+  const examCounts = { newbie:15, training:5, tech:8, sales:8, client:8 };
   return `
     <div class="panel-card ${panel}" onclick="APP.enterPanel('${panel}')">
       <div class="panel-icon">${PANEL_ICONS[panel]||'📋'}</div>
       <div class="panel-title">${PANEL_LABELS[panel]||panel}</div>
       <div class="panel-desc">${PANEL_DESCS[panel]||''}</div>
       <div class="panel-meta">
-        <span class="badge badge-${panel}">${panel==='newbie'?'15套考试':'8套考试'}</span>
-        <span class="badge badge-${panel}">20题/套</span>
+        <span class="badge badge-${panel}">${examCounts[panel]||8}套考试</span>
+        <span class="badge badge-${panel}">18题/套</span>
         <span class="badge badge-${panel}">95分及格</span>
       </div>
     </div>`;
@@ -704,7 +706,7 @@ function goHome(){
 
 // ===== 模块辅助函数 =====
 function getAllModuleIds(){
-  const ids = ['newbie', 'tech', 'sales', 'client'];
+  const ids = ['newbie', 'training', 'tech', 'sales', 'client'];
   for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
     if (ids.includes(id)) continue;
     if ((mod.bankIds || []).length > 0) ids.push(id);
