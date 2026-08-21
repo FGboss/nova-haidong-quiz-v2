@@ -639,6 +639,88 @@ app.post('/api/mentor/assign', mentorAuth, async (req, res) => {
   res.json({ success: true, assigned: valid });
 });
 
+// ===== 排行榜（只读，学员/导师/管理员均可查看） =====
+// 积分规则：每场考试取最高分，>=90 得3分，80-89 得2分，<80 得1分
+// 徽章规则：满分学霸(100分) / 高分达人(>=95) / 首战告捷(首次通过) / 稳定发挥(通过>=3场) / 多面手(>=3个板块)
+app.get('/api/leaderboard', authMiddleware, async (req, res) => {
+  const records = await db.readJSON('records.json');
+  const users = await db.readObj('users.json');
+  const panels = await getAllPanels();
+  const config = await getModuleConfig();
+
+  // 面板名称：优先内置映射，其次模块配置
+  function panelName(id){
+    if (PANEL_LABELS[id]) return PANEL_LABELS[id];
+    const mod = (config.fixedModules || {})[id] || (config.customModules || {})[id];
+    return mod ? mod.name : id;
+  }
+
+  // 按学生分组，每场考试(panel+examId)取最高分
+  const studentMap = {};
+  for (const r of records) {
+    const name = r.studentName;
+    if (!studentMap[name]) studentMap[name] = { records: [], exams: {} };
+    studentMap[name].records.push(r);
+    const key = `${r.panel || 'newbie'}|${r.examId}`;
+    const score = r.finalScore !== undefined ? r.finalScore : (r.autoScore !== undefined ? r.autoScore : 0);
+    if (!studentMap[name].exams[key] || score > studentMap[name].exams[key].score) {
+      studentMap[name].exams[key] = { score, panel: r.panel || 'newbie', passed: r.passed, examId: r.examId, submitTime: r.submitTime };
+    }
+  }
+
+  const leaderboard = [];
+  for (const [name, data] of Object.entries(studentMap)) {
+    // 按姓名反查角色（防止测试账号/管理员误入学员榜）
+    const byName = Object.values(users).find(u => u.name === name);
+    const role = byName ? byName.role : (users[name] ? users[name].role : 'student');
+    if (role !== 'student') continue;
+
+    const examScores = Object.values(data.exams);
+    let totalPoints = 0;
+    let passedCount = 0;
+    let bestScore = 0;
+    const panelBest = {};
+    for (const e of examScores) {
+      const pts = e.score >= 90 ? 3 : (e.score >= 80 ? 2 : 1);
+      totalPoints += pts;
+      if (e.passed) passedCount++;
+      if (e.score > bestScore) bestScore = e.score;
+      const p = e.panel;
+      if (!panelBest[p] || e.score > panelBest[p]) panelBest[p] = e.score;
+    }
+
+    // 徽章计算
+    const badges = [];
+    if (bestScore >= 100) badges.push({ id: 'perfect', icon: '🏆', name: '满分学霸', desc: '单场考试拿到100分' });
+    if (bestScore >= 95) badges.push({ id: 'high', icon: '💯', name: '高分达人', desc: '单场考试95分以上' });
+    const firstRecord = data.records.sort((a,b) => new Date(a.submitTime) - new Date(b.submitTime))[0];
+    if (firstRecord && (firstRecord.finalScore !== undefined ? firstRecord.finalScore : firstRecord.autoScore) >= PASSING_SCORE) {
+      badges.push({ id: 'firstwin', icon: '🚀', name: '首战告捷', desc: '第一次答题即通过' });
+    }
+    if (passedCount >= 3) badges.push({ id: 'steady', icon: '🌟', name: '稳定发挥', desc: '3场以上考试通过' });
+    if (Object.keys(panelBest).length >= 3) badges.push({ id: 'versatile', icon: '🎯', name: '多面手', desc: '在3个以上板块有记录' });
+
+    leaderboard.push({
+      name,
+      totalPoints,
+      passedCount,
+      bestScore,
+      examCount: examScores.length,
+      badges,
+      panelBest
+    });
+  }
+
+  leaderboard.sort((a,b) => b.totalPoints - a.totalPoints || b.bestScore - a.bestScore);
+
+  res.json({
+    success: true,
+    leaderboard,
+    panels: panels.map(p => ({ id: p, name: panelName(p) })),
+    rule: '每场考试取最高分计积分：≥90分+3分，80-89分+2分，80分以下+1分；徽章为达标自动解锁'
+  });
+});
+
 // ===== 考试配置 API =====
 
 app.get('/api/exams', async (req, res) => {

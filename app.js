@@ -8,7 +8,7 @@ const MAX_ATTEMPTS = 10;
 const REMINDER_TEXT = '考核只是以练代训，请独立完成、真实作答，不要使用AI或他人代答哦，我可是在盯着你呢～';
 // 分数分级：<80红 / 80-89黄 / 90+绿
 function getScoreTag(score){
-  if (score >= PASSING_SCORE) return { label:'及格通过', cls:'badge-success', color:'var(--success)', level:3 };
+  if (score >= PASSING_SCORE) return { label:'非常优秀', cls:'badge-success', color:'var(--success)', level:3 };
   if (score >= 80) return { label:'再努把力', cls:'badge-warning', color:'var(--warning)', level:2 };
   return { label:'仍需努力', cls:'badge-danger', color:'var(--danger)', level:1 };
 }
@@ -395,6 +395,7 @@ async function renderHome(app){
           <span style="font-size:13px;opacity:.9">${escapeHtml(user.name)} (${user.role==='admin'?'管理员':user.role==='mentor'?'导师':'学员'})</span>
           ${isMentor ? `<button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.goMentor()">管理面板</button>` : ''}
           ${isAdmin ? `<button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.goAdmin()">用户管理</button>` : ''}
+          <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.openLeaderboard()">🏆 排行榜</button>
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.viewMyRecords()">我的记录</button>
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.logout()">退出</button>
         </div>
@@ -799,7 +800,7 @@ function renderResult(app){
   const passed = record.passed;
   const typeScores = record.typeScores || {};
   const tag = getScoreTag(score);
-  const resultText = score >= PASSING_SCORE ? '🎉 恭喜通过！' : (score >= 80 ? '💪 再努把力就通过了！' : '📖 仍需继续努力，加油！');
+  const resultText = score >= PASSING_SCORE ? '🎉 非常优秀，恭喜通过！' : (score >= 80 ? '💪 再努把力就通过了！' : '📖 仍需继续努力，加油！');
 
   app.innerHTML = `
     <div class="header">
@@ -869,6 +870,84 @@ function getModuleName(panelId){
   if (PANEL_LABELS[panelId]) return PANEL_LABELS[panelId];
   const mod = (state.modules.fixedModules || {})[panelId] || (state.modules.customModules || {})[panelId];
   return mod ? mod.name : panelId;
+}
+
+// ===== 排行榜 =====
+let _lbState = { data: null, panel: 'all' };
+async function openLeaderboard(){
+  try {
+    const res = await api('/api/leaderboard');
+    if (!res.success){ showToast('排行榜加载失败','error'); return; }
+    _lbState = { data: res, panel: 'all' };
+    renderLeaderboardModal();
+  } catch(e){ showToast('排行榜加载失败','error'); }
+}
+
+function renderLeaderboardModal(){
+  const data = _lbState.data;
+  const myName = state.currentUser ? state.currentUser.name : '';
+  const panelFilter = _lbState.panel;
+
+  // 计算榜单数据
+  let rows = data.leaderboard;
+  let title = '总积分榜';
+  if (panelFilter !== 'all'){
+    title = getModuleName(panelFilter) + ' 榜';
+    rows = rows.map(s => {
+      const best = s.panelBest[panelFilter];
+      return { ...s, _panelScore: best !== undefined ? best : null };
+    }).filter(s => s._panelScore !== null)
+      .sort((a,b) => b._panelScore - a._panelScore);
+  }
+
+  // 找当前用户排名
+  const myRank = rows.findIndex(s => s.name === myName) + 1;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:760px">
+      <div class="modal-header">
+        <span>🏆 排行榜</span>
+        <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+      </div>
+      <div class="modal-body" style="max-height:72vh;overflow-y:auto">
+        <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn btn-sm ${panelFilter==='all'?'btn-primary':'btn-outline'}" onclick="APP.switchLbPanel('all')">🏆 总积分榜</button>
+          ${data.panels.map(p => `<button class="btn btn-sm ${panelFilter===p.id?'btn-primary':'btn-outline'}" onclick="APP.switchLbPanel('${p.id}')">${escapeHtml(p.name)}</button>`).join('')}
+        </div>
+        <div style="font-size:12px;color:var(--text-sec);margin-bottom:12px">📌 ${escapeHtml(data.rule)}</div>
+
+        ${rows.length === 0 ? '<div class="empty-state"><div class="empty-state-text">暂无排行数据</div></div>' : `
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>排名</th><th>学员</th><th>积分</th>${panelFilter==='all' ? '<th>最佳成绩</th><th>通过场次</th>' : '<th>板块最高分</th>'}<th>徽章</th></tr></thead>
+          <tbody>${rows.slice(0, 50).map((s, i) => {
+            const isMe = s.name === myName;
+            const rank = i + 1;
+            const rankBadge = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : rank));
+            const scoreToShow = panelFilter==='all' ? (s.bestScore !== undefined ? s.bestScore + '分' : '-') : (s._panelScore !== null ? s._panelScore + '分' : '-');
+            return `<tr style="${isMe ? 'background:var(--primary-light)' : ''}">
+              <td><strong>${rankBadge}</strong>${isMe ? ' <span style="font-size:11px;color:var(--primary)">(我)</span>' : ''}</td>
+              <td>${escapeHtml(s.name)}</td>
+              <td><strong style="color:${s.totalPoints >= 3 ? 'var(--success)' : 'var(--text)'}">${panelFilter==='all' ? s.totalPoints + '分' : (s._panelScore !== null ? (s._panelScore >= PASSING_SCORE ? 3 : (s._panelScore >= 80 ? 2 : 1)) + '分' : '-')}</strong></td>
+              ${panelFilter==='all' ? `<td>${scoreToShow}</td><td>${s.passedCount}场</td>` : `<td>${scoreToShow}</td>`}
+              <td>${s.badges.length > 0 ? s.badges.map(b => `<span title="${escapeHtml(b.name)}：${escapeHtml(b.desc)}" style="cursor:help;font-size:16px;margin-right:2px">${b.icon}</span>`).join('') : '<span style="font-size:12px;color:var(--text-sec)">-</span>'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+        ${myRank > 0 && myRank <= 50 ? `<div style="font-size:12px;color:var(--text-sec);margin-top:8px">你的排名：第 ${myRank} 名</div>` : ''}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function switchLbPanel(panelId){
+  _lbState.panel = panelId;
+  document.querySelector('.modal-overlay')?.remove();
+  renderLeaderboardModal();
 }
 
 // ===== 我的记录 =====
@@ -2445,6 +2524,8 @@ window.APP = {
   toggleStudentChip, saveAssignment,
   // QR Code
   showQRModal, showToast,
+  // Leaderboard
+  openLeaderboard, switchLbPanel,
   // Render
   render
 };
