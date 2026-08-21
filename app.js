@@ -76,6 +76,103 @@ function showToast(msg, type='info'){
   setTimeout(() => { t.remove(); }, 2500);
 }
 
+// ===== QR 码生成 =====
+// 使用 qrserver API 生成二维码图片
+function getQRImageUrl(data, size){
+  size = size || 200;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=10&data=${encodeURIComponent(data)}`;
+}
+
+function showQRModal(title, url, subtitle){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay fade-in';
+  overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
+
+  const qrUrl = getQRImageUrl(url);
+  overlay.innerHTML = `
+    <div class="modal qr-modal" style="max-width:380px">
+      <div class="modal-header">
+        <span>📱 扫码进入</span>
+        <span style="cursor:pointer;font-size:22px;line-height:1" class="qr-close-btn">×</span>
+      </div>
+      <div class="modal-body">
+        <div class="qr-title">${escapeHtml(title)}</div>
+        ${subtitle ? `<div class="qr-sub">${escapeHtml(subtitle)}</div>` : ''}
+        <div style="display:flex;align-items:center;justify-content:center;min-height:220px">
+          <img src="${qrUrl}" width="200" height="200" alt="QR Code"
+            style="display:block;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)"
+            onerror="this.onerror=null;this.parentElement.innerHTML='<div style=text-align:center;padding:40px;color:#94a3b8>'+
+              '<div style=font-size:48px;margin-bottom:8px>📱</div>'+
+              '<div style=font-size:14px>二维码加载失败</div>'+
+              '<div style=font-size:12px;margin-top:4px>请复制链接手动打开</div></div>'">
+        </div>
+        <div class="qr-url">${escapeHtml(url)}</div>
+        <div class="qr-actions">
+          <button class="btn btn-outline btn-sm qr-copy-btn">📋 复制链接</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // 绑定事件
+  overlay.querySelector('.qr-close-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.qr-copy-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(url).then(() => showToast('链接已复制到剪贴板','success'));
+  });
+}
+
+// 获取当前完整 URL（不含参数）
+function getBaseUrl(){
+  return window.location.origin + window.location.pathname;
+}
+
+// ===== URL 路由：扫码自动跳转 =====
+function handleUrlRouting(){
+  const params = new URLSearchParams(window.location.search);
+  const panel = params.get('panel');
+  const exam = params.get('exam');
+  if (panel) {
+    state._qrTarget = { panel, exam };
+  }
+}
+
+async function executeQrTarget(){
+  if (!state._qrTarget) return;
+  const { panel, exam } = state._qrTarget;
+  state._qrTarget = null;
+  // 清除 URL 参数
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState({}, '', getBaseUrl());
+  }
+  if (exam) {
+    // 先进入板块，再开始考试
+    state.panel = panel;
+    state.panelInfo = null;
+    state.page = 'panel';
+    const res = await api(`/api/exams?panel=${panel}`);
+    if (res.success) {
+      state.exams = res.exams;
+      const attRes = await api(`/api/attempts/${encodeURIComponent(state.currentUser.name)}`);
+      if (attRes.success) {
+        state.exams = state.exams.map(e => ({
+          ...e, _attempts: (attRes.attempts[e.id] || 0),
+          _blocked: (attRes.attempts[e.id] || 0) >= MAX_ATTEMPTS
+        }));
+      }
+      // 找到对应考试
+      const targetExam = state.exams.find(e => e.id === exam);
+      if (targetExam && !targetExam._blocked) {
+        setTimeout(() => startExam(exam), 300);
+        return;
+      }
+    }
+    // 如果找不到考试，进入板块页面
+    render();
+  } else if (panel) {
+    enterPanel(panel);
+  }
+}
+
 // ===== 渲染引擎 =====
 function render(){
   const app = $('#app');
@@ -96,10 +193,12 @@ function render(){
 
 // ===== 登录/注册 =====
 function renderLogin(app){
+  const baseUrl = getBaseUrl();
   app.innerHTML = `
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:20px">
       <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:100%;max-width:420px;overflow:hidden">
-        <div style="text-align:center;padding:30px 20px 10px">
+        <div style="text-align:center;padding:30px 20px 10px;position:relative">
+          <button class="qr-btn qr-btn-sm" style="position:absolute;top:12px;right:12px" onclick="APP.showQRModal('扫码打开考核系统','${baseUrl}','手机扫码即可打开诺瓦&嗨动产品培训考核系统')" title="扫码进入系统">📱</button>
           <div style="font-size:48px;margin-bottom:8px">📝</div>
           <h2 style="font-size:20px;font-weight:800">诺瓦&嗨动 产品培训考核系统</h2>
           <p style="font-size:13px;color:#64748b;margin-top:4px">V3 · 学员/导师登录</p>
@@ -200,7 +299,12 @@ async function doLogin(username, password){
       localStorage.setItem('quiz_auth_token', res.user.token);
       localStorage.setItem('quiz_current_user', JSON.stringify(res.user));
       state.page = 'home';
-      render();
+      if (state._qrTarget) {
+        // 延迟执行 QR 目标跳转，等首页渲染完成
+        setTimeout(() => executeQrTarget(), 200);
+      } else {
+        render();
+      }
     } else {
       showToast(res.error || '登录失败','error');
     }
@@ -220,7 +324,11 @@ async function doRegister(username, password, name){
       localStorage.setItem('quiz_current_user', JSON.stringify(res.user));
       showToast('注册成功！','success');
       state.page = 'home';
-      render();
+      if (state._qrTarget) {
+        setTimeout(() => executeQrTarget(), 200);
+      } else {
+        render();
+      }
     } else {
       showToast(res.error || '注册失败','error');
     }
@@ -293,8 +401,13 @@ async function renderHome(app){
 
 function renderPanelCard(panel){
   const examCounts = { newbie:15, training:5, tech:8, sales:8, client:8 };
+  const baseUrl = getBaseUrl();
+  const qrUrl = `${baseUrl}?panel=${panel}`;
   return `
-    <div class="panel-card ${panel}" onclick="APP.enterPanel('${panel}')">
+    <div class="panel-card ${panel}" style="position:relative" onclick="APP.enterPanel('${panel}')">
+      <div class="qr-card-badge">
+        <button class="qr-btn qr-btn-sm" onclick="event.stopPropagation();APP.showQRModal('${PANEL_LABELS[panel]||panel}','${qrUrl}','扫码直接进入「${PANEL_LABELS[panel]||panel}」考核板块')" title="扫码进入此模块">📱</button>
+      </div>
       <div class="panel-icon">${PANEL_ICONS[panel]||'📋'}</div>
       <div class="panel-title">${PANEL_LABELS[panel]||panel}</div>
       <div class="panel-desc">${PANEL_DESCS[panel]||''}</div>
@@ -308,8 +421,13 @@ function renderPanelCard(panel){
 
 function renderDynamicPanelCard(mod){
   const examCount = (mod.bankIds || []).length;
+  const baseUrl = getBaseUrl();
+  const qrUrl = `${baseUrl}?panel=${mod.id}`;
   return `
-    <div class="panel-card new-product" onclick="APP.enterPanel('${mod.id}','${escapeHtml(mod.name)}','${escapeHtml(mod.icon||'📋')}')">
+    <div class="panel-card new-product" style="position:relative" onclick="APP.enterPanel('${mod.id}','${escapeHtml(mod.name)}','${escapeHtml(mod.icon||'📋')}')">
+      <div class="qr-card-badge">
+        <button class="qr-btn qr-btn-sm" onclick="event.stopPropagation();APP.showQRModal('${escapeHtml(mod.name)}','${qrUrl}','扫码直接进入「${escapeHtml(mod.name)}」考核板块')" title="扫码进入此模块">📱</button>
+      </div>
       <div class="panel-icon">${mod.icon||'📋'}</div>
       <div class="panel-title">${escapeHtml(mod.name)}</div>
       <div class="panel-desc">${escapeHtml(mod.desc||'')}</div>
@@ -364,6 +482,9 @@ function renderPanel(app){
   const panel = state.panel;
   const exams = state.exams || [];
   const user = state.currentUser;
+  const baseUrl = getBaseUrl();
+  const panelName = state.panelInfo ? state.panelInfo.name : (PANEL_LABELS[panel] || '考核');
+  const panelQrUrl = `${baseUrl}?panel=${panel}`;
 
   let html = `
     <div class="header">
@@ -372,7 +493,8 @@ function renderPanel(app){
           <div class="nav-back" onclick="APP.goHome()">← 返回首页</div>
           <h1 style="margin-top:4px">${state.panelInfo ? (state.panelInfo.icon + ' ' + state.panelInfo.name) : (PANEL_LABELS[panel] || '考核')}</h1>
         </div>
-        <div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="qr-btn qr-btn-white" onclick="APP.showQRModal('${panelName}','${panelQrUrl}','扫码直接进入「${panelName}」考核板块')" title="扫码分享此模块">📱</button>
           <span style="font-size:13px;opacity:.9">${escapeHtml(user.name)}</span>
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3);margin-left:8px" onclick="APP.goHome()">返回</button>
         </div>
@@ -418,17 +540,22 @@ function renderPanel(app){
 }
 
 function renderExamList(exams){
-  return `<div class="exam-list">${exams.map(e => `
+  const baseUrl = getBaseUrl();
+  const panel = state.panel;
+  return `<div class="exam-list">${exams.map(e => {
+    const qrUrl = `${baseUrl}?panel=${panel}&exam=${e.id}`;
+    return `
     <div class="exam-item${e._blocked ? ' blocked' : ''}" data-exam-id="${e.id}">
       <div class="exam-item-info">
         <div class="exam-item-title">${escapeHtml(e.title)}</div>
         <div class="exam-item-desc">${e.totalQuestions}题 · ${e.duration}分钟 · ${e._blocked ? '已达上限' : (e._attempts > 0 ? `已答${e._attempts}次` : '未答')}</div>
       </div>
       <div class="exam-item-meta">
+        <button class="qr-btn qr-btn-sm" onclick="event.stopPropagation();APP.showQRModal('${escapeHtml(e.title)}','${qrUrl}','扫码直接进入考试「${escapeHtml(e.title)}」')" title="扫码进入此考试">📱</button>
         ${e._blocked ? '<span class="badge badge-danger">已达上限</span>' : '<span class="badge badge-success">可答题</span>'}
         <span style="font-size:20px">→</span>
       </div>
-    </div>`).join('')}</div>`;
+    </div>`;}).join('')}</div>`;
 }
 
 // ===== 开始考试 =====
@@ -2151,11 +2278,16 @@ async function saveAssignment(mentorUsername){
 function restoreSession(){
   const token = localStorage.getItem('quiz_auth_token');
   const user = localStorage.getItem('quiz_current_user');
+  handleUrlRouting();
   if (token && user){
     try {
       state.authToken = token;
       state.currentUser = JSON.parse(user);
       state.page = 'home';
+      // 如果有 QR 目标，延迟执行跳转
+      if (state._qrTarget) {
+        setTimeout(() => executeQrTarget(), 100);
+      }
     } catch(e){
       state.page = 'login';
     }
@@ -2187,6 +2319,8 @@ window.APP = {
   // Admin
   openCreateMentor, createMentor, resetUserPassword, deleteUser,
   toggleStudentChip, saveAssignment,
+  // QR Code
+  showQRModal, showToast,
   // Render
   render
 };
