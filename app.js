@@ -3,8 +3,15 @@
 
 // ===== 配置 =====
 const API_BASE = window.location.origin;
-const PASSING_SCORE = 95;
+const PASSING_SCORE = 90;
 const MAX_ATTEMPTS = 10;
+const REMINDER_TEXT = '考核只是以练代训，请独立完成、真实作答，不要使用AI或他人代答哦，我可是在盯着你呢～';
+function reminderBanner(compact){
+  return `<div style="background:linear-gradient(90deg,#fef3c7,#fde68a);border:1px solid #f59e0b;color:#92400e;border-radius:10px;padding:${compact?'7px 14px':'11px 16px'};font-size:${compact?'12px':'13px'};font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;line-height:1.5">
+    <span style="font-size:${compact?'14px':'17px'};flex-shrink:0">📢</span>
+    <span>${REMINDER_TEXT}</span>
+  </div>`;
+}
 const PANEL_LABELS = { newbie:'新人专项', training:'新人培训专项（祥雨/伟桀）', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核' };
 const PANEL_COLORS = { newbie:'newbie', training:'training', tech:'tech', sales:'sales', client:'client', new_product:'new-product' };
 const PANEL_ICONS = { newbie:'📚', training:'🎓', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕' };
@@ -388,6 +395,7 @@ async function renderHome(app){
       </div>
     </div>
     <div class="container">
+      ${reminderBanner(false)}
       <div class="home-hero">
         <h1>选择考核板块</h1>
         <p>请根据你的培训阶段选择对应的考核板块</p>
@@ -414,7 +422,7 @@ function renderPanelCard(panel){
       <div class="panel-meta">
         <span class="badge badge-${panel}">${examCounts[panel]||8}套考试</span>
         <span class="badge badge-${panel}">18题/套</span>
-        <span class="badge badge-${panel}">95分及格</span>
+        <span class="badge badge-${panel}">${PASSING_SCORE}分及格</span>
       </div>
     </div>`;
 }
@@ -434,7 +442,7 @@ function renderDynamicPanelCard(mod){
       <div class="panel-meta">
         <span class="badge badge-new-product">${examCount}套考试</span>
         <span class="badge badge-new-product">18题/套</span>
-        <span class="badge badge-new-product">95分及格</span>
+        <span class="badge badge-new-product">${PASSING_SCORE}分及格</span>
       </div>
     </div>`;
 }
@@ -486,6 +494,31 @@ function renderPanel(app){
   const panelName = state.panelInfo ? state.panelInfo.name : (PANEL_LABELS[panel] || '考核');
   const panelQrUrl = `${baseUrl}?panel=${panel}`;
 
+  let sections = '';
+  if (panel === 'newbie'){
+    const weeks = [1,2,3];
+    for (const w of weeks){
+      const weekExams = exams.filter(e => e.week === w);
+      if (weekExams.length === 0) continue;
+      sections += `<div class="week-section"><div class="week-title">📅 第${w}周</div>`;
+      sections += renderExamList(weekExams);
+      sections += `</div>`;
+    }
+  } else {
+    const brands = [
+      { key:'诺瓦', label:'诺瓦 (NovaStar)', dot:'nova' },
+      { key:'嗨动', label:'嗨动 (Hynamic)', dot:'haidong' },
+      { key:'综合', label:'综合考核', dot:'' }
+    ];
+    for (const b of brands){
+      const brandExams = exams.filter(e => e.brand === b.key);
+      if (brandExams.length === 0) continue;
+      sections += `<div class="brand-section"><div class="brand-title">${b.dot ? `<span class="brand-dot ${b.dot}"></span>` : ''}${b.label}</div>`;
+      sections += renderExamList(brandExams);
+      sections += `</div>`;
+    }
+  }
+
   let html = `
     <div class="header">
       <div class="header-inner">
@@ -500,35 +533,13 @@ function renderPanel(app){
         </div>
       </div>
     </div>
-    <div class="container">`;
-
-  if (panel === 'newbie'){
-    const weeks = [1,2,3];
-    for (const w of weeks){
-      const weekExams = exams.filter(e => e.week === w);
-      if (weekExams.length === 0) continue;
-      html += `<div class="week-section"><div class="week-title">📅 第${w}周</div>`;
-      html += renderExamList(weekExams);
-      html += `</div>`;
-    }
-  } else {
-    const brands = [
-      { key:'诺瓦', label:'诺瓦 (NovaStar)', dot:'nova' },
-      { key:'嗨动', label:'嗨动 (Hynamic)', dot:'haidong' },
-      { key:'综合', label:'综合考核', dot:'' }
-    ];
-    for (const b of brands){
-      const brandExams = exams.filter(e => e.brand === b.key);
-      if (brandExams.length === 0) continue;
-      html += `<div class="brand-section"><div class="brand-title">${b.dot ? `<span class="brand-dot ${b.dot}"></span>` : ''}${b.label}</div>`;
-      html += renderExamList(brandExams);
-      html += `</div>`;
-    }
-  }
-
-  html += `<div style="text-align:center;margin-top:20px;color:var(--text-sec);font-size:13px">
-    每套考试最多 ${MAX_ATTEMPTS} 次尝试机会 · 及格线 ${PASSING_SCORE} 分 · 每次随机抽题
-  </div></div>`;
+    <div class="container">
+      ${reminderBanner(false)}
+      ${sections}
+      <div style="text-align:center;margin-top:20px;color:var(--text-sec);font-size:13px">
+        每套考试最多 ${MAX_ATTEMPTS} 次尝试机会 · 及格线 ${PASSING_SCORE} 分 · 每次随机抽题
+      </div>
+    </div>`;
 
   app.innerHTML = html;
 
@@ -605,6 +616,7 @@ function renderQuiz(app){
       </div>
     </div>
     <div class="container" style="padding-top:16px" id="questionContainer">
+      ${reminderBanner(true)}
       ${questions.map((q, i) => renderQuestion(q, i)).join('')}
     </div>
     <div style="text-align:center;padding:20px">

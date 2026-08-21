@@ -38,7 +38,7 @@ app.use(express.static(path.join(__dirname), {
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const PASSING_SCORE = 95;
+const PASSING_SCORE = 90;
 const MAX_ATTEMPTS = 10;
 
 const TYPE_ORDER = ['single', 'multiple', 'judge', 'short'];
