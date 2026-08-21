@@ -955,6 +955,7 @@ async function goMentor(){
   state.page = 'mentor';
   state.mentorTab = 'overview';
   await syncAllRecords();
+  await loadMentorAssignments();
   render();
 }
 
@@ -978,8 +979,8 @@ async function syncAllRecords(){
 }
 
 function renderMentor(app){
-  const tabs = ['overview','records','scoring','question_bank','weak_areas'];
-  const tabLabels = { overview:'数据看板', records:'答题记录', scoring:'评分管理', question_bank:'题库管理', weak_areas:'查缺补漏' };
+  const tabs = ['overview','records','scoring','students','question_bank','weak_areas'];
+  const tabLabels = { overview:'数据看板', records:'答题记录', scoring:'评分管理', students:'学员管理', question_bank:'题库管理', weak_areas:'查缺补漏' };
   // 导师/管理员额外标签
   const extraTabs = ['product_banks'];
   const extraLabels = { product_banks:'产品题库导入管理' };
@@ -1004,6 +1005,7 @@ function renderMentor(app){
     case 'overview': renderMentorOverview(); break;
     case 'records': renderMentorRecords(); break;
     case 'scoring': renderMentorScoring(); break;
+    case 'students': renderMentorStudents(); break;
     case 'question_bank': renderMentorQuestionBank(); break;
     case 'weak_areas': renderMentorWeakAreas(); break;
     case 'product_banks': renderProductBankManager(); break;
@@ -1013,6 +1015,103 @@ function renderMentor(app){
 function switchMentorTab(tab){
   state.mentorTab = tab;
   render();
+}
+
+// ===== 学员管理（导师自主分配学员） =====
+async function loadMentorAssignments(){
+  try {
+    const res = await api('/api/mentor/assignments');
+    if (res.success){
+      state.mentorAllStudents = res.students;
+      state.mentorAssigned = res.assigned;
+    }
+  } catch(e){ console.error('load mentor assignments error:', e); }
+}
+
+function renderMentorStudents(){
+  const students = state.mentorAllStudents || [];
+  const assigned = state.mentorAssigned || [];
+  const assignedSet = new Set(assigned);
+  const myName = state.currentUser.username;
+  // 初始化临时选择（以当前已分配为基础）
+  if (!window._assignmentSelections) window._assignmentSelections = {};
+  if (!window._assignmentSelections[myName]) window._assignmentSelections[myName] = new Set(assigned);
+
+  let html = `
+    <div class="card">
+      <div class="card-title">我的学员</div>
+      <div style="font-size:13px;color:var(--text-sec);margin-bottom:12px">
+        勾选你负责的学员，保存后即可在数据看板、答题记录中查看他们的考核情况（当前已选 ${window._assignmentSelections[myName].size} 人）
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+        ${students.length > 0 ? students.map(s => {
+          const isSelected = window._assignmentSelections[myName].has(s.username);
+          return `<span class="student-chip ${isSelected ? 'selected' : ''}" id="mchip_${s.username}" onclick="APP.toggleMentorStudentChip('${s.username}')" style="display:inline-block;padding:6px 12px;border-radius:20px;font-size:13px;cursor:pointer;border:1px solid var(--border);transition:all .2s;${isSelected ? 'background:var(--primary-light);border-color:var(--primary);color:var(--primary);font-weight:600' : ''}">
+            ${escapeHtml(s.name)}<span style="opacity:.6;font-size:11px;margin-left:4px">(${escapeHtml(s.username)})</span>
+          </span>`;
+        }).join('') : '<div style="color:var(--text-sec);font-size:13px">暂无学员，等学员注册后即可在这里选择</div>'}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="APP.saveMentorAssignment()">💾 保存分配</button>
+        <button class="btn btn-outline btn-sm" onclick="APP.resetMentorSelection()">重置选择</button>
+      </div>
+    </div>`;
+
+  $('#mentorContent').innerHTML = html;
+}
+
+function toggleMentorStudentChip(studentUsername){
+  const myName = state.currentUser.username;
+  if (!window._assignmentSelections[myName]) window._assignmentSelections[myName] = new Set();
+  const sel = window._assignmentSelections[myName];
+  if (sel.has(studentUsername)) sel.delete(studentUsername);
+  else sel.add(studentUsername);
+
+  const chip = document.getElementById(`mchip_${studentUsername}`);
+  if (chip){
+    if (sel.has(studentUsername)){
+      chip.style.background = 'var(--primary-light)';
+      chip.style.borderColor = 'var(--primary)';
+      chip.style.color = 'var(--primary)';
+      chip.style.fontWeight = '600';
+    } else {
+      chip.style.background = '';
+      chip.style.borderColor = 'var(--border)';
+      chip.style.color = '';
+      chip.style.fontWeight = '';
+    }
+  }
+  // 更新已选数量
+  const countLabel = document.querySelector('#mentorContent .card-title');
+  if (countLabel){
+    const desc = countLabel.parentElement.querySelector('div[style*="color:var(--text-sec)"]');
+    if (desc) desc.textContent = `勾选你负责的学员，保存后即可在数据看板、答题记录中查看他们的考核情况（当前已选 ${sel.size} 人）`;
+  }
+}
+
+function resetMentorSelection(){
+  const myName = state.currentUser.username;
+  const assigned = state.mentorAssigned || [];
+  window._assignmentSelections[myName] = new Set(assigned);
+  renderMentorStudents();
+}
+
+async function saveMentorAssignment(){
+  const myName = state.currentUser.username;
+  const sel = window._assignmentSelections[myName];
+  if (!sel){ showToast('请选择学员','error'); return; }
+  const studentUsernames = Array.from(sel);
+  try {
+    const res = await api('/api/mentor/assign', {
+      method:'POST', body:JSON.stringify({ studentUsernames })
+    });
+    if (res.success){
+      state.mentorAssigned = res.assigned;
+      showToast('学员分配已保存','success');
+      // 刷新导师面板数据
+      await syncAllRecords();
+    } else { showToast(res.error||'保存失败','error'); }
+  } catch(e){ showToast('保存失败','error'); }
 }
 
 // ===== 数据看板 =====
@@ -2308,6 +2407,8 @@ window.APP = {
   filterMentorPanel, setScoringFilter,
   viewRecordDetail, openScoringDetail, saveMentorScore, resetMentorScore,
   deleteRecord, clearAllRecords, exportRecords,
+  // 学员管理（导师自主分配）
+  toggleMentorStudentChip, saveMentorAssignment, resetMentorSelection,
   // Question Bank
   renderMentorQuestionBank, filterQBankPanel, searchQBank,
   openEditQuestion, saveEditQuestion, openAddQuestion, saveAddQuestion, deleteQuestion,

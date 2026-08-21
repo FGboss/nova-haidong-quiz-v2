@@ -613,6 +613,32 @@ app.get('/api/admin/assignments', adminAuth, async (req, res) => {
   res.json({ success: true, assignments: list });
 });
 
+// ===== 导师自主分配学员 =====
+// 导师获取所有学员 + 自己的分配关系（管理员也可用）
+app.get('/api/mentor/assignments', mentorAuth, async (req, res) => {
+  const users = await db.readObj('users.json');
+  const mentors = await db.readObj('mentors.json');
+  const students = Object.values(users)
+    .filter(u => u.role === 'student')
+    .map(u => ({ username: u.username, name: u.name }));
+  const assigned = (mentors[req.currentUser.username] || []).filter(s => users[s]);
+  res.json({ success: true, students, assigned });
+});
+
+// 导师保存自己的学员分配（只允许修改自己的分配，不影响他人）
+app.post('/api/mentor/assign', mentorAuth, async (req, res) => {
+  const { studentUsernames } = req.body;
+  if (!studentUsernames || !Array.isArray(studentUsernames)) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  const users = await db.readObj('users.json');
+  const mentors = await db.readObj('mentors.json');
+  const valid = studentUsernames.filter(s => users[s] && users[s].role === 'student');
+  mentors[req.currentUser.username] = valid;
+  await db.writeObj('mentors.json', mentors);
+  res.json({ success: true, assigned: valid });
+});
+
 // ===== 考试配置 API =====
 
 app.get('/api/exams', async (req, res) => {
