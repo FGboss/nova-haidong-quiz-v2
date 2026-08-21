@@ -6,6 +6,12 @@ const API_BASE = window.location.origin;
 const PASSING_SCORE = 90;
 const MAX_ATTEMPTS = 10;
 const REMINDER_TEXT = '考核只是以练代训，请独立完成、真实作答，不要使用AI或他人代答哦，我可是在盯着你呢～';
+// 分数分级：<80红 / 80-89黄 / 90+绿
+function getScoreTag(score){
+  if (score >= PASSING_SCORE) return { label:'及格通过', cls:'badge-success', color:'var(--success)', level:3 };
+  if (score >= 80) return { label:'再努把力', cls:'badge-warning', color:'var(--warning)', level:2 };
+  return { label:'仍需努力', cls:'badge-danger', color:'var(--danger)', level:1 };
+}
 function reminderBanner(compact){
   return `<div style="background:linear-gradient(90deg,#fef3c7,#fde68a);border:1px solid #f59e0b;color:#92400e;border-radius:10px;padding:${compact?'7px 14px':'11px 16px'};font-size:${compact?'12px':'13px'};font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;line-height:1.5">
     <span style="font-size:${compact?'14px':'17px'};flex-shrink:0">📢</span>
@@ -792,6 +798,8 @@ function renderResult(app){
   const score = record.finalScore !== undefined ? record.finalScore : record.autoScore;
   const passed = record.passed;
   const typeScores = record.typeScores || {};
+  const tag = getScoreTag(score);
+  const resultText = score >= PASSING_SCORE ? '🎉 恭喜通过！' : (score >= 80 ? '💪 再努把力就通过了！' : '📖 仍需继续努力，加油！');
 
   app.innerHTML = `
     <div class="header">
@@ -803,9 +811,10 @@ function renderResult(app){
     </div>
     <div class="container">
       <div class="score-display">
-        <div class="score-number ${passed ? 'score-pass' : 'score-fail'}">${score}<span style="font-size:24px;font-weight:500;opacity:0.6"> / 100</span></div>
+        <div class="score-number" style="color:${tag.color}">${score}<span style="font-size:24px;font-weight:500;opacity:0.6"> / 100</span></div>
         <div class="score-label">最终得分</div>
-        <div class="score-status ${passed ? 'score-pass' : 'score-fail'}">${passed ? '🎉 恭喜通过！' : '继续加油！'}</div>
+        <div style="margin-top:8px"><span class="badge ${tag.cls}" style="font-size:14px;padding:5px 14px">${tag.label}</span></div>
+        <div class="score-status" style="color:${tag.color}">${resultText}</div>
         <div style="font-size:13px;color:var(--text-sec);margin-top:4px">第${record.attemptNumber}次答题 · 剩余${state.remainingAttempts}次机会</div>
       </div>
       <div class="score-breakdown">
@@ -889,8 +898,9 @@ async function viewMyRecords(){
                   <strong style="margin-left:8px">${escapeHtml(r.examId)}</strong>
                 </div>
                 <div>
-                  <span style="font-weight:700;font-size:18px;color:${score >= PASSING_SCORE ? 'var(--success)' : 'var(--danger)'}">${score}分</span>
-                  <span style="font-size:12px;color:var(--text-sec);margin-left:8px">${r.passed ? '✅通过' : '❌未通过'}</span>
+                  ${(() => { const t = getScoreTag(score); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
+                  <span class="badge ${t.cls}" style="margin-left:8px">${t.label}</span>
+                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${r.passed ? '✅通过' : '❌未通过'}</span>`; })()}
                   ${r.mentorScored ? '<span class="badge badge-success" style="margin-left:4px">已评</span>' : ''}
                 </div>
               </div>
@@ -934,6 +944,7 @@ function showRecordDetailModal(record){
       <div class="modal-body" style="max-height:70vh;overflow-y:auto">
         <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
           <div class="stat-card"><div class="stat-value">${score}</div><div class="stat-label">最终得分</div></div>
+          <div class="stat-card"><div class="stat-value" style="font-size:16px;line-height:1.2;padding-top:10px"><span class="badge ${getScoreTag(score).cls}" style="font-size:13px">${getScoreTag(score).label}</span></div><div class="stat-label">等级</div></div>
           <div class="stat-card"><div class="stat-value">${record.autoScore||0}</div><div class="stat-label">自动评分</div></div>
           <div class="stat-card"><div class="stat-value">${record.mentorScored ? '✅' : '❌'}</div><div class="stat-label">是否已评</div></div>
         </div>
@@ -1206,7 +1217,7 @@ function renderMentorRecords(){
           <td><span class="badge badge-${PANEL_COLORS[panel]||'newbie'}">${PANEL_LABELS[panel]||'新人'}</span></td>
           <td>${escapeHtml(r.examId)}</td>
           <td><strong>${score}</strong></td>
-          <td>${r.passed ? '<span class="badge badge-success">通过</span>' : '<span class="badge badge-danger">未通过</span>'}</td>
+          <td>${(() => { const t = getScoreTag(score); return `<span class="badge ${t.cls}">${t.label}</span>`; })()}</td>
           <td style="font-size:12px">${new Date(r.submitTime).toLocaleString('zh-CN')}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
@@ -1319,7 +1330,7 @@ function renderMentorScoringSub(filter){
           <td>${escapeHtml(r.examId)}</td>
           <td>${autoScore}</td>
           <td>${mentorScore}</td>
-          <td><strong>${finalScore}</strong> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
+          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore).cls}">${getScoreTag(finalScore).label}</span> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
             <button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">评分</button>
