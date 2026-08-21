@@ -7,7 +7,7 @@ services:
     plan: free
     healthCheckPath: /api/health
     autoDeploy: true
-    # V2.3 - 2026-08-19: 内存缓存+Supabase回退修复
+    # V2.3 - 2026-08-21: 三级二维码扫码功能
     envVars:
       - key: NODE_ENV
         value: production
