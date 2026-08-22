@@ -937,6 +937,11 @@ app.get('/api/mentor/records', mentorAuth, async (req, res) => {
     filtered = filtered.filter(r => r.studentName.toLowerCase().includes(s) || r.examId.toLowerCase().includes(s));
   }
   
+  // 附加考试标题（不改底层数据，仅响应时补充，方便导师识别）
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  filtered = filtered.map(r => ({ ...r, examTitle: titleMap.get(r.examId) || r.examId }));
+  
   res.json({ success: true, records: filtered, total: filtered.length });
 });
 
@@ -991,9 +996,13 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
 app.get('/api/student/records', authMiddleware, async (req, res) => {
   const records = await db.readJSON('records.json');
   const studentName = req.currentUser.name;
-  const filtered = records.filter(r => r.studentName === studentName);
+  let filtered = records.filter(r => r.studentName === studentName);
   // 按时间倒序
   filtered.sort((a, b) => new Date(b.submitTime || 0).getTime() - new Date(a.submitTime || 0).getTime());
+  // 附加考试标题（不改底层数据，仅响应时补充）
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  filtered = filtered.map(r => ({ ...r, examTitle: titleMap.get(r.examId) || r.examId }));
   res.json({ success: true, records: filtered, total: filtered.length });
 });
 
@@ -1001,7 +1010,11 @@ app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
   const records = await db.readJSON('records.json');
   const record = records.find(r => r.id === req.params.id);
   if (!record) return res.status(404).json({ error: '记录不存在' });
-  res.json({ success: true, record });
+  // 附加考试标题
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  const enriched = { ...record, examTitle: titleMap.get(record.examId) || record.examId };
+  res.json({ success: true, record: enriched });
 });
 
 app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
@@ -1508,6 +1521,13 @@ app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
     wrongByExam: Object.values(s.wrongByExam).sort((a, b) => b.wrongCount - a.wrongCount)
   })).sort((a, b) => b.wrongQuestions - a.wrongQuestions);
   
+  // 附加考试标题（不改底层数据，仅响应时补充）
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  for (const s of result) {
+    for (const we of s.wrongByExam) we.examTitle = titleMap.get(we.examId) || we.examId;
+  }
+  
   res.json({ success: true, students: result, totalStudents: result.length });
 });
 
@@ -1532,6 +1552,10 @@ app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
       });
     }
   }
+  // 附加考试标题（不改底层数据，仅响应时补充）
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  for (const w of allWrong) w.examTitle = titleMap.get(w.examId) || w.examId;
   res.json({ success: true, studentName: req.params.studentName, wrongQuestions: allWrong, totalWrong: allWrong.length });
 });
 

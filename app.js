@@ -993,7 +993,7 @@ async function viewMyRecords(){
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <div>
                   <span class="badge badge-${PANEL_COLORS[panel]||'newbie'}">${PANEL_LABELS[panel]||'新人'}</span>
-                  <strong style="margin-left:8px">${escapeHtml(r.examId)}</strong>
+                  <strong style="margin-left:8px">${escapeHtml(r.examTitle || r.examId)}</strong>
                 </div>
                 <div>
                   ${(() => { const t = getScoreTag(score); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
@@ -1036,7 +1036,7 @@ function showRecordDetailModal(record){
   overlay.innerHTML = `
     <div class="modal fade-in" style="max-width:700px">
       <div class="modal-header">
-        <span>${escapeHtml(record.studentName)} - ${escapeHtml(record.examId)}</span>
+        <span>${escapeHtml(record.studentName)} - ${escapeHtml(record.examTitle || record.examId)}</span>
         <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
       </div>
       <div class="modal-body" style="max-height:70vh;overflow-y:auto">
@@ -1313,7 +1313,7 @@ function renderMentorRecords(){
         return `<tr>
           <td>${escapeHtml(r.studentName)}</td>
           <td><span class="badge badge-${PANEL_COLORS[panel]||'newbie'}">${PANEL_LABELS[panel]||'新人'}</span></td>
-          <td>${escapeHtml(r.examId)}</td>
+          <td>${escapeHtml(r.examTitle || r.examId)}</td>
           <td><strong>${score}</strong></td>
           <td>${(() => { const t = getScoreTag(score); return `<span class="badge ${t.cls}">${t.label}</span>`; })()}</td>
           <td style="font-size:12px">${new Date(r.submitTime).toLocaleString('zh-CN')}</td>
@@ -1425,7 +1425,7 @@ function renderMentorScoringSub(filter){
         const finalScore = r.finalScore !== undefined ? r.finalScore : autoScore;
         return `<tr>
           <td>${escapeHtml(r.studentName)}</td>
-          <td>${escapeHtml(r.examId)}</td>
+          <td>${escapeHtml(r.examTitle || r.examId)}</td>
           <td>${autoScore}</td>
           <td>${mentorScore}</td>
           <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore).cls}">${getScoreTag(finalScore).label}</span> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
@@ -1739,7 +1739,7 @@ async function renderMentorWeakAreas(){
         <tbody>`;
     for (const s of students){
       const worstExam = s.wrongByExam && s.wrongByExam.length > 0 ? s.wrongByExam[0] : null;
-      const worstExamLabel = worstExam ? `${worstExam.examId} (${worstExam.wrongCount}错)` : '-';
+      const worstExamLabel = worstExam ? `${worstExam.examTitle || worstExam.examId} (${worstExam.wrongCount}错)` : '-';
       const errorRateColor = s.errorRate >= 50 ? 'var(--danger)' : s.errorRate >= 30 ? 'var(--warning)' : 'var(--success)';
       html += `<tr>
         <td><strong>${escapeHtml(s.studentName)}</strong></td>
@@ -1776,7 +1776,7 @@ async function viewStudentWeakDetail(studentName){
             for (const w of wrong){ if (!byExam[w.examId]) byExam[w.examId] = []; byExam[w.examId].push(w); }
             return Object.entries(byExam).map(([examId, items]) => `
               <div style="margin-bottom:16px">
-                <div style="font-weight:700;font-size:14px;color:var(--danger);margin-bottom:8px">${escapeHtml(examId)} — ${items.length}道错题</div>
+                <div style="font-weight:700;font-size:14px;color:var(--danger);margin-bottom:8px">${escapeHtml(items[0].examTitle || examId)} — ${items.length}道错题</div>
                 ${items.map((w,i) => `
                   <div class="answer-detail">
                     <div class="answer-detail-q">${i+1}. [${TYPE_LABELS[w.type]||'单题'}] ${escapeHtml(w.question)}</div>
