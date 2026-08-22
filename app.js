@@ -93,6 +93,22 @@ function showToast(msg, type='info'){
   document.body.appendChild(t);
   setTimeout(() => { t.remove(); }, 2500);
 }
+// 搜索框绑定：处理中文输入法组合输入（composition）
+// 拼音打字过程中 input 事件会多次触发且值为拼音字母，组合结束时才产生中文
+// 组合期间忽略 input，组合结束（compositionend）再触发一次搜索
+function bindSearchInput(el, handler){
+  if (!el) return;
+  let composing = false;
+  el.addEventListener('compositionstart', () => { composing = true; });
+  el.addEventListener('compositionend', (e) => {
+    composing = false;
+    handler(e.target.value);
+  });
+  el.addEventListener('input', function(e){
+    if (composing || e.isComposing) return; // 组合输入期间忽略，避免拼音字母被搜索
+    handler(this.value);
+  });
+}
 
 // ===== QR 码生成 =====
 // 使用 qrserver API 生成二维码图片
@@ -696,8 +712,8 @@ function bindQuestionEvents(){
   });
 
   $$('.short-answer').forEach(el => {
-    el.addEventListener('input', () => {
-      state.answers[el.dataset.qid] = el.value;
+    bindSearchInput(el, v => {
+      state.answers[el.dataset.qid] = v;
       updateProgress();
     });
   });
@@ -1333,10 +1349,8 @@ function renderMentorRecords(){
   $('#mentorContent').innerHTML = html;
 
   setTimeout(() => {
-    const si = $('#searchInput');
-    const ssi = $('#searchStudentInput');
-    if (si) si.addEventListener('input', function(){ state.searchQuery = this.value; renderMentorRecords(); });
-    if (ssi) ssi.addEventListener('input', function(){ state.searchStudent = this.value; renderMentorRecords(); });
+    bindSearchInput($('#searchInput'), v => { state.searchQuery = v; renderMentorRecords(); });
+    bindSearchInput($('#searchStudentInput'), v => { state.searchStudent = v; renderMentorRecords(); });
   }, 0);
 }
 
@@ -1485,7 +1499,7 @@ function renderQBankContent(){
         }).filter(Boolean).join('')}
       </div>
       <div style="display:flex;gap:8px">
-        <input class="form-input" id="qbankSearch" placeholder="搜索题目..." style="width:200px;padding:6px 10px;font-size:13px" value="${escapeHtml(_qbankSearch)}" oninput="APP.searchQBank(this.value)">
+        <input class="form-input" id="qbankSearch" placeholder="搜索题目..." style="width:200px;padding:6px 10px;font-size:13px" value="${escapeHtml(_qbankSearch)}">
       </div>
     </div>`;
 
@@ -1538,6 +1552,9 @@ function renderQBankContent(){
   }
 
   content.innerHTML = html;
+
+  // 搜索框绑定（带中文输入法组合守卫）
+  bindSearchInput($('#qbankSearch'), v => { _qbankSearch = v; renderQBankContent(); });
 }
 
 function filterQBankPanel(panel){ _qbankPanel = panel; renderQBankContent(); }
