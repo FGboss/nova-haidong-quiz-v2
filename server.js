@@ -458,19 +458,24 @@ app.post('/api/auth/register', async (req, res) => {
   if (username.length < 2 || username.length > 20) return res.status(400).json({ error: '用户名需2-20个字符' });
   if (password.length < 4) return res.status(400).json({ error: '密码至少4位' });
   
-  const users = await db.readObj('users.json');
-  if (users[username]) return res.status(400).json({ error: '用户名已存在' });
-  
-  const token = generateToken();
-  users[username] = {
-    username, name: name.trim(),
-    password: hashPassword(password),
-    role: 'student',
-    token,
-    createdAt: new Date().toISOString()
-  };
-  await db.writeObj('users.json', users);
-  res.json({ success: true, user: { username, name: name.trim(), role: 'student', token } });
+  let result = null;
+  let conflict = false;
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    if (users[username]) { conflict = true; return; }
+    const token = generateToken();
+    users[username] = {
+      username, name: name.trim(),
+      password: hashPassword(password),
+      role: 'student',
+      token,
+      createdAt: new Date().toISOString()
+    };
+    await db.writeRaw('users.json', users);
+    result = { username, name: name.trim(), role: 'student', token };
+  });
+  if (conflict) return res.status(400).json({ error: '用户名已存在' });
+  res.json({ success: true, user: result });
 });
 
 // 学员登录
@@ -478,7 +483,7 @@ app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: '请输入用户名和密码' });
   
-  const users = await db.readObj('users.json');
+  const users = await db.readObjRaw('users.json');
   const user = users[username];
   if (!user) return res.status(401).json({ error: '用户名不存在' });
   if (user.password !== hashPassword(password)) return res.status(401).json({ error: '密码错误' });
@@ -486,7 +491,7 @@ app.post('/api/auth/login', async (req, res) => {
   const token = generateToken();
   user.token = token;
   users[username] = user;
-  await db.writeObj('users.json', users);
+  await db.writeRaw('users.json', users);
   
   res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, token } });
 });
@@ -817,64 +822,75 @@ app.post('/api/records', async (req, res) => {
   const record = req.body;
   if (!record.studentName || !record.examId) return res.status(400).json({ error: '数据不完整' });
   
-  const records = await db.readJSON('records.json');
-  
-  if (record.id) {
-    const dupId = records.find(r => r.id === record.id);
-    if (dupId) { console.log('[dedup] ID duplicate'); return res.json({ success: true, record: dupId, deduped: true }); }
-  }
-  
-  const dupTime = records.find(r =>
-    r.studentName === record.studentName && r.examId === record.examId &&
-    Math.abs(new Date(r.submitTime).getTime() - new Date(record.submitTime).getTime()) < 5000
-  );
-  if (dupTime) { console.log('[dedup] Time duplicate'); return res.json({ success: true, record: dupTime, deduped: true }); }
-  
-  const questions = record.questions || [];
-  let autoScore = 0;
-  const questionScores = {};
-  const typeScores = { single: { score: 0, max: 0 }, multiple: { score: 0, max: 0 }, judge: { score: 0, max: 0 }, short: { score: 0, max: 0 } };
-  
-  // 归一化答案格式：数组→排序字符串，布尔→A/B，字符串→原样
-  function normalizeAns(ans) {
-    if (ans === null || ans === undefined) return '';
-    if (Array.isArray(ans)) return ans.map(String).sort().join('');
-    if (typeof ans === 'boolean') return ans ? 'A' : 'B';
-    return String(ans);
-  }
-  
-  for (const q of questions) {
-    const qType = q.type || q._type || 'single';
-    const points = q.points || 5;
-    const userAnswer = (record.answers || {})[q.id];
-    let score = 0;
-    if (qType === 'single' || qType === 'judge') {
-      score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
-    } else if (qType === 'multiple') {
-      score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
-    } else if (qType === 'short') {
-      score = gradeShortAnswer(userAnswer, q.keywords, points);
+  // 整段「读-改-写」加锁：防止多人同时提交时互相覆盖丢记录
+  let savedRecord = null;
+  let dupResult = null;
+  await db.withLock('records.json', async () => {
+    const records = await db.readJSONRaw('records.json');
+    
+    if (record.id) {
+      const dupId = records.find(r => r.id === record.id);
+      if (dupId) { console.log('[dedup] ID duplicate'); dupResult = { record: dupId, deduped: true }; return; }
     }
-    autoScore += score;
-    questionScores[q.id] = { score, maxScore: points };
-    typeScores[qType] = typeScores[qType] || { score: 0, max: 0 };
-    typeScores[qType].score += score;
-    typeScores[qType].max += points;
+    
+    const dupTime = records.find(r =>
+      r.studentName === record.studentName && r.examId === record.examId &&
+      Math.abs(new Date(r.submitTime).getTime() - new Date(record.submitTime).getTime()) < 5000
+    );
+    if (dupTime) { console.log('[dedup] Time duplicate'); dupResult = { record: dupTime, deduped: true }; return; }
+    
+    const questions = record.questions || [];
+    let autoScore = 0;
+    const questionScores = {};
+    const typeScores = { single: { score: 0, max: 0 }, multiple: { score: 0, max: 0 }, judge: { score: 0, max: 0 }, short: { score: 0, max: 0 } };
+    
+    // 归一化答案格式：数组→排序字符串，布尔→A/B，字符串→原样
+    function normalizeAns(ans) {
+      if (ans === null || ans === undefined) return '';
+      if (Array.isArray(ans)) return ans.map(String).sort().join('');
+      if (typeof ans === 'boolean') return ans ? 'A' : 'B';
+      return String(ans);
+    }
+    
+    for (const q of questions) {
+      const qType = q.type || q._type || 'single';
+      const points = q.points || 5;
+      const userAnswer = (record.answers || {})[q.id];
+      let score = 0;
+      if (qType === 'single' || qType === 'judge') {
+        score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
+      } else if (qType === 'multiple') {
+        score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
+      } else if (qType === 'short') {
+        score = gradeShortAnswer(userAnswer, q.keywords, points);
+      }
+      autoScore += score;
+      questionScores[q.id] = { score, maxScore: points };
+      typeScores[qType] = typeScores[qType] || { score: 0, max: 0 };
+      typeScores[qType].score += score;
+      typeScores[qType].max += points;
+    }
+    
+    if (!record.id) record.id = 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    record.submitTime = record.submitTime || new Date().toISOString();
+    record.autoScore = autoScore;
+    record.finalScore = autoScore;
+    record.passed = autoScore >= PASSING_SCORE;
+    record.questionScores = questionScores;
+    record.typeScores = typeScores;
+    record.mentorScored = false;
+    
+    records.push(record);
+    await db.writeRaw('records.json', records);
+    savedRecord = record;
+  });
+  
+  if (dupResult) return res.json({ success: true, ...dupResult });
+  if (savedRecord) {
+    console.log('[records] New:', savedRecord.studentName, savedRecord.examId, 'score:', savedRecord.autoScore);
+    return res.json({ success: true, record: savedRecord });
   }
-  
-  if (!record.id) record.id = 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  record.submitTime = record.submitTime || new Date().toISOString();
-  record.autoScore = autoScore;
-  record.finalScore = autoScore;
-  record.passed = autoScore >= PASSING_SCORE;
-  record.questionScores = questionScores;
-  record.typeScores = typeScores;
-  record.mentorScored = false;
-  
-  records.push(record);
-  await db.writeJSON('records.json', records);
-  console.log('[records] New:', record.studentName, record.examId, 'score:', autoScore);
-  res.json({ success: true, record });
+  res.status(500).json({ error: '提交失败，请重试' });
 });
 
 // ===== 导师/管理员 API =====
@@ -990,45 +1006,62 @@ app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
 
 app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   const { mentorScore, finalScore, passed, mentorScored, mentorScoreDetails, questionScores, typeScores } = req.body;
-  const records = await db.readJSON('records.json');
-  const idx = records.findIndex(r => r.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: '记录不存在' });
-  if (mentorScore !== undefined) records[idx].mentorScore = mentorScore;
-  if (finalScore !== undefined) records[idx].finalScore = finalScore;
-  if (passed !== undefined) records[idx].passed = passed;
-  if (mentorScored !== undefined) records[idx].mentorScored = mentorScored;
-  if (mentorScoreDetails !== undefined) records[idx].mentorScoreDetails = mentorScoreDetails;
-  if (questionScores !== undefined) records[idx].questionScores = questionScores;
-  if (typeScores !== undefined) records[idx].typeScores = typeScores;
-  await db.writeJSON('records.json', records);
-  res.json({ success: true, record: records[idx] });
+  let saved = null;
+  await db.withLock('records.json', async () => {
+    const records = await db.readJSONRaw('records.json');
+    const idx = records.findIndex(r => r.id === req.params.id);
+    if (idx < 0) return;
+    if (mentorScore !== undefined) records[idx].mentorScore = mentorScore;
+    if (finalScore !== undefined) records[idx].finalScore = finalScore;
+    if (passed !== undefined) records[idx].passed = passed;
+    if (mentorScored !== undefined) records[idx].mentorScored = mentorScored;
+    if (mentorScoreDetails !== undefined) records[idx].mentorScoreDetails = mentorScoreDetails;
+    if (questionScores !== undefined) records[idx].questionScores = questionScores;
+    if (typeScores !== undefined) records[idx].typeScores = typeScores;
+    await db.writeRaw('records.json', records);
+    saved = records[idx];
+  });
+  if (!saved) return res.status(404).json({ error: '记录不存在' });
+  res.json({ success: true, record: saved });
 });
 
 app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
-  const records = await db.readJSON('records.json');
-  const idx = records.findIndex(r => r.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: '记录不存在' });
-  records[idx].mentorScore = null;
-  records[idx].finalScore = records[idx].autoScore;
-  records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
-  records[idx].mentorScored = false;
-  records[idx].mentorScoreDetails = null;
-  await db.writeJSON('records.json', records);
-  res.json({ success: true, record: records[idx] });
+  let saved = null;
+  await db.withLock('records.json', async () => {
+    const records = await db.readJSONRaw('records.json');
+    const idx = records.findIndex(r => r.id === req.params.id);
+    if (idx < 0) return;
+    records[idx].mentorScore = null;
+    records[idx].finalScore = records[idx].autoScore;
+    records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
+    records[idx].mentorScored = false;
+    records[idx].mentorScoreDetails = null;
+    await db.writeRaw('records.json', records);
+    saved = records[idx];
+  });
+  if (!saved) return res.status(404).json({ error: '记录不存在' });
+  res.json({ success: true, record: saved });
 });
 
 app.delete('/api/mentor/records/:id', mentorAuth, async (req, res) => {
-  const records = await db.readJSON('records.json');
-  const idx = records.findIndex(r => r.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: '记录不存在' });
-  const deleted = records.splice(idx, 1)[0];
-  await db.writeJSON('records.json', records);
+  let deleted = null;
+  await db.withLock('records.json', async () => {
+    const records = await db.readJSONRaw('records.json');
+    const idx = records.findIndex(r => r.id === req.params.id);
+    if (idx < 0) return;
+    deleted = records.splice(idx, 1)[0];
+    await db.writeRaw('records.json', records);
+  });
+  if (!deleted) return res.status(404).json({ error: '记录不存在' });
   res.json({ success: true, deleted });
 });
 
 app.delete('/api/mentor/records', mentorAuth, async (req, res) => {
-  const count = await db.readJSON('records.json').length;
-  await db.writeJSON('records.json', []);
+  let count = 0;
+  await db.withLock('records.json', async () => {
+    count = (await db.readJSONRaw('records.json')).length;
+    await db.writeRaw('records.json', []);
+  });
   res.json({ success: true, deletedCount: count });
 });
 
@@ -1505,15 +1538,18 @@ app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
 // 重置学员尝试次数
 app.post('/api/mentor/reset-attempts', mentorAuth, async (req, res) => {
   const { studentName, examId } = req.body;
-  const records = await db.readJSON('records.json');
-  const toRemove = records.filter(r => {
-    if (studentName && r.studentName !== studentName) return false;
-    if (examId && r.examId !== examId) return false;
-    return true;
+  let removedCount = 0;
+  await db.withLock('records.json', async () => {
+    const records = await db.readJSONRaw('records.json');
+    const remaining = records.filter(r => {
+      if (studentName && r.studentName !== studentName) return true;
+      if (examId && r.examId !== examId) return true;
+      removedCount++;
+      return false;
+    });
+    await db.writeRaw('records.json', remaining);
   });
-  const remaining = records.filter(r => !toRemove.includes(r));
-  await db.writeJSON('records.json', remaining);
-  res.json({ success: true, removedCount: toRemove.length });
+  res.json({ success: true, removedCount });
 });
 
 // ===== 从 Supabase 恢复题库文件（启动时） =====

@@ -79,7 +79,12 @@ function api(path, opts={}){
   const url = path.startsWith('http') ? path : API_BASE + path;
   const headers = opts.headers || { 'Content-Type':'application/json' };
   if (state.authToken) headers['x-auth-token'] = state.authToken;
-  return fetch(url, { ...opts, headers }).then(r => r.json());
+  // 请求超时兜底：20秒无响应则中断（防止冷启动/网络卡死时按钮永久无反应）
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeout || 20000);
+  return fetch(url, { ...opts, headers, signal: controller.signal })
+    .finally(() => clearTimeout(timer))
+    .then(r => r.json());
 }
 function showToast(msg, type='info'){
   const t = document.createElement('div');
@@ -619,7 +624,7 @@ function renderQuiz(app){
       </div>
       <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
         <span class="quiz-progress" id="quizProgress">已答 ${answered} / ${questions.length} · 第${state.attemptNumber}次答题</span>
-        <button class="btn btn-success btn-sm" onclick="APP.confirmSubmit()">提交试卷</button>
+        <button class="btn btn-success btn-sm" id="submitBtn" onclick="APP.confirmSubmit()">提交试卷</button>
       </div>
     </div>
     <div class="container" style="padding-top:16px" id="questionContainer">
@@ -763,6 +768,14 @@ async function submitQuiz(){
   state._submitting = true;
   clearInterval(state.quizTimer);
 
+  // 提交中状态：按钮禁用 + 显示进度，防止无反馈误判
+  const btn = document.getElementById('submitBtn');
+  if (btn){
+    btn.disabled = true;
+    btn.textContent = '⏳ 提交中…';
+    btn.style.opacity = '0.7';
+  }
+
   const record = {
     studentName: state.currentUser.name,
     examId: state.currentExam.id,
@@ -781,12 +794,18 @@ async function submitQuiz(){
       state.page = 'result';
       render();
     } else {
-      showToast('提交失败，请重试','error');
-      state._submitting = false;
+      showToast(res.error || '提交失败，请重试','error');
     }
   } catch(e){
-    showToast('网络错误，提交失败','error');
-    state._submitting = false;
+    // 答案保留在 state.answers 中，提示可重试
+    showToast('网络超时，提交未完成，请点击重试','error');
+  } finally {
+    state._submitting = false; // 锁必然释放，永不卡死
+    if (btn && state.page !== 'result'){
+      btn.disabled = false;
+      btn.textContent = '提交试卷';
+      btn.style.opacity = '1';
+    }
   }
 }
 
