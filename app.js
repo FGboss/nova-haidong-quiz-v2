@@ -1325,12 +1325,19 @@ function renderMentorRecords(){
   const records = state.mentorRecords;
   let filtered = records;
   if (state.mentorPanel !== 'all') filtered = filtered.filter(r => r.panel === state.mentorPanel);
+  // 考试名称筛选：匹配考试标题（如 LCD液晶拼接 / Kompass FX3 Pro新版），也兼容考试ID
   if (state.searchQuery){
     const s = state.searchQuery.toLowerCase();
-    filtered = filtered.filter(r => r.studentName.toLowerCase().includes(s) || r.examId.toLowerCase().includes(s));
+    filtered = filtered.filter(r => {
+      const title = (r.examTitle || r.examId || '').toLowerCase();
+      const id = (r.examId || '').toLowerCase();
+      return title.includes(s) || id.includes(s);
+    });
   }
+  // 学员姓名筛选
   if (state.searchStudent){
-    filtered = filtered.filter(r => r.studentName.includes(state.searchStudent));
+    const s = state.searchStudent.toLowerCase();
+    filtered = filtered.filter(r => (r.studentName || '').toLowerCase().includes(s));
   }
 
   let html = `
@@ -1339,8 +1346,8 @@ function renderMentorRecords(){
       ${getAllModuleIds().map(p => `<button class="btn btn-sm ${state.mentorPanel===p?'btn-primary':'btn-outline'}" onclick="APP.filterMentorPanel('${p}')">${getModuleName(p)}</button>`).join('')}
     </div>
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-      <input class="form-input" id="searchInput" placeholder="🔍 搜索学员姓名/考试ID..." style="width:220px;padding:6px 10px;font-size:13px" value="${escapeHtml(state.searchQuery)}">
-      <input class="form-input" id="searchStudentInput" placeholder="按学员筛选..." style="width:160px;padding:6px 10px;font-size:13px" value="${escapeHtml(state.searchStudent)}">
+      <input class="form-input" id="searchInput" placeholder="🔍 按考试名称筛选（支持部分词语）..." style="width:240px;padding:6px 10px;font-size:13px" value="${escapeHtml(state.searchQuery)}">
+      <input class="form-input" id="searchStudentInput" placeholder="按学员姓名筛选..." style="width:180px;padding:6px 10px;font-size:13px" value="${escapeHtml(state.searchStudent)}">
       <button class="btn btn-sm btn-success" onclick="APP.exportRecords()">📥 导出Excel</button>
       <span style="font-size:13px;color:var(--text-sec);margin-left:auto">共 ${filtered.length} 条</span>
     </div>`;
@@ -1389,6 +1396,7 @@ function filterMentorPanel(panel){
 function exportRecords(){
   const params = new URLSearchParams();
   if (state.mentorPanel !== 'all') params.set('panel', state.mentorPanel);
+  if (state.searchQuery) params.set('exam', state.searchQuery);
   if (state.searchStudent) params.set('student', state.searchStudent);
   const url = `${API_BASE}/api/mentor/records/export?${params.toString()}`;
   const a = document.createElement('a');

@@ -1052,7 +1052,7 @@ app.get('/api/mentor/students', mentorAuth, async (req, res) => {
 // 获取答题记录（导师看自己学员的，管理员看全部）
 app.get('/api/mentor/records', mentorAuth, async (req, res) => {
   const records = await db.readJSON('records.json');
-  const { search, panel, student } = req.query;
+  const { search, panel, student, exam } = req.query;
   let filtered = records;
   
   if (req.currentUser.role !== 'admin') {
@@ -1067,17 +1067,33 @@ app.get('/api/mentor/records', mentorAuth, async (req, res) => {
     filtered = filtered.filter(r => assignedNames.has(r.studentName));
   }
   
+  // 考试标题映射（供按「考试名称」筛选 + 展示，考试ID/标题均可命中）
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  const examTextOf = r => (r.examTitle || titleMap.get(r.examId) || r.examId || '');
+  
   if (panel && panel !== 'all') filtered = filtered.filter(r => r.panel === panel);
-  if (student) filtered = filtered.filter(r => r.studentName.includes(student));
+  if (student) {
+    const s = String(student).toLowerCase();
+    filtered = filtered.filter(r => (r.studentName || '').toLowerCase().includes(s));
+  }
+  if (exam) {
+    const s = String(exam).toLowerCase();
+    filtered = filtered.filter(r =>
+      (r.examId || '').toLowerCase().includes(s) || examTextOf(r).toLowerCase().includes(s)
+    );
+  }
   if (search) {
-    const s = search.toLowerCase();
-    filtered = filtered.filter(r => r.studentName.toLowerCase().includes(s) || r.examId.toLowerCase().includes(s));
+    const s = String(search).toLowerCase();
+    filtered = filtered.filter(r =>
+      (r.studentName || '').toLowerCase().includes(s) ||
+      (r.examId || '').toLowerCase().includes(s) ||
+      examTextOf(r).toLowerCase().includes(s)
+    );
   }
   
   // 附加考试标题（不改底层数据，仅响应时补充，方便导师识别）
-  const exams = await getAllExams();
-  const titleMap = new Map(exams.map(e => [e.id, e.title]));
-  filtered = filtered.map(r => ({ ...r, examTitle: titleMap.get(r.examId) || r.examId }));
+  filtered = filtered.map(r => ({ ...r, examTitle: examTextOf(r) }));
   
   res.json({ success: true, records: filtered, total: filtered.length });
 });
@@ -1095,13 +1111,26 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
     filtered = filtered.filter(r => assignedNames.has(r.studentName));
   }
   
+  const exams = await getAllExams();
+  const titleMap = new Map(exams.map(e => [e.id, e.title]));
+  const examTextOf = r => titleMap.get(r.examId) || r.examId || '';
+  
   if (req.query.panel && req.query.panel !== 'all') filtered = filtered.filter(r => r.panel === req.query.panel);
-  if (req.query.student) filtered = filtered.filter(r => r.studentName.includes(req.query.student));
+  if (req.query.student) {
+    const s = String(req.query.student).toLowerCase();
+    filtered = filtered.filter(r => (r.studentName || '').toLowerCase().includes(s));
+  }
+  if (req.query.exam) {
+    const s = String(req.query.exam).toLowerCase();
+    filtered = filtered.filter(r =>
+      (r.examId || '').toLowerCase().includes(s) || examTextOf(r).toLowerCase().includes(s)
+    );
+  }
   
   const panelLabels = PANEL_LABELS;
   const rows = [['学员姓名', '板块', '考试ID', '考试标题', '自动评分', '导师评分', '最终得分', '是否通过', '是否已评', '答题次数', '提交时间', '用时(秒)']];
   for (const r of filtered) {
-    const exam = (await getAllExams()).find(e => e.id === r.examId);
+    const exam = exams.find(e => e.id === r.examId);
     rows.push([
       r.studentName,
       panelLabels[r.panel] || r.panel || '',
