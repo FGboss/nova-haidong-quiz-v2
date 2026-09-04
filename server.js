@@ -131,6 +131,129 @@ async function adminAuth(req, res, next) {
   } catch(e) { next(e); }
 }
 
+// ===== 用户信息修改（改名/重置密码） — 带关联数据安全迁移 =====
+// 数据关联关系：
+//   - records.json（答题记录/排行榜）按「姓名 name」归属（studentName）
+//   - mentors.json（导师分配）按「用户名 username」关联（导师键 = 学员数组）
+// 因此修改时：
+//   - username 变化 → 迁移 users.json 键 + mentors.json 中全部引用（导师键 / 学员数组）
+//   - name 变化（学员）→ 迁移 records.json 中 studentName 旧名→新名，历史成绩不丢失
+// 加锁顺序固定：users.json → mentors.json → records.json（逐步释放，绝不嵌套交叉，防死锁）
+// patch 可选字段：newUsername / name / newPassword（至少一项），改动均为增量。
+function applyUserEdit(oldUsername, patch, editor) {
+  return new Promise(async (resolve) => {
+    try {
+      const newUsername = (typeof patch.newUsername === 'string' && patch.newUsername.trim()) ? patch.newUsername.trim() : null;
+      const newName = (typeof patch.name === 'string' && patch.name.trim()) ? patch.name.trim() : null;
+      const newPassword = (typeof patch.newPassword === 'string' && patch.newPassword) ? patch.newPassword : null;
+
+      if (!newUsername && !newName && !newPassword) return resolve({ error: '没有需要修改的内容', status: 400 });
+      if (newUsername !== null && (newUsername.length < 2 || newUsername.length > 20)) return resolve({ error: '用户名需2-20个字符', status: 400 });
+      if (newName !== null && newName.length === 0) return resolve({ error: '姓名不能为空', status: 400 });
+      if (newPassword !== null && newPassword.length < 4) return resolve({ error: '新密码至少4位', status: 400 });
+
+      // 导师作用域预检：只能改自己名下、且角色为学员的账号
+      if (editor.role !== 'admin') {
+        const preUsers = await db.readObj('users.json');
+        const preTarget = preUsers[oldUsername];
+        if (!preTarget) return resolve({ error: '用户不存在', status: 404 });
+        if (preTarget.role !== 'student') return resolve({ error: '只能修改学员账号', status: 403 });
+        const preMentors = await db.readObj('mentors.json');
+        const preAssigned = preMentors[editor.username] || [];
+        if (!preAssigned.includes(oldUsername)) return resolve({ error: '该学员不在你的名下，无权限修改', status: 403 });
+      }
+
+      let result = null;
+      let userRole = '';
+      let migrateUsername = null; // { from, to }
+      let migrateName = null;     // { from, to }
+
+      // 第 1 步：users.json（含唯一性校验）
+      await db.withLock('users.json', async () => {
+        const users = await db.readObjRaw('users.json');
+        const user = users[oldUsername];
+        if (!user) { result = { error: '用户不存在', status: 404 }; return; }
+        if (user.username === 'PC') { result = { error: '不能修改超级管理员账号', status: 400 }; return; }
+
+        userRole = user.role;
+        const finalName = newName !== null ? newName : user.name;
+
+        if (newUsername !== null && newUsername !== oldUsername) {
+          if (users[newUsername]) { result = { error: `用户名「${newUsername}」已被占用`, status: 400 }; return; }
+          if (userRole === 'admin') { result = { error: '不能修改管理员账号的用户名', status: 400 }; return; }
+        }
+        // 姓名唯一性：答题记录按姓名归属，学员重名会导致历史成绩合并错乱
+        if (finalName !== user.name && userRole === 'student') {
+          const clash = Object.values(users).find(u => u !== user && u.role === 'student' && u.name === finalName);
+          if (clash) { result = { error: `已有学员使用姓名「${finalName}」，为避免成绩串号请换一个姓名`, status: 400 }; return; }
+        }
+
+        const updated = { ...user, name: finalName };
+        if (newPassword !== null) updated.password = hashPassword(newPassword);
+
+        let finalUsername = oldUsername;
+        if (newUsername !== null && newUsername !== oldUsername) {
+          finalUsername = newUsername;
+          updated.username = newUsername;
+          migrateUsername = { from: oldUsername, to: newUsername };
+        }
+        if (finalName !== user.name && userRole === 'student') {
+          migrateName = { from: user.name, to: finalName };
+        }
+
+        delete users[oldUsername];
+        users[finalUsername] = updated;
+        await db.writeRaw('users.json', users);
+        result = {
+          success: true,
+          user: { username: finalUsername, name: finalName, role: userRole },
+          renamed: !!migrateUsername,
+          nameChanged: !!migrateName
+        };
+      });
+      if (!result || !result.success) return resolve(result);
+
+      // 第 2 步：mentors.json（导师被改名则迁移键；学员被改名则替换分配数组中的引用）
+      if (migrateUsername) {
+        await db.withLock('mentors.json', async () => {
+          const mentors = await db.readObjRaw('mentors.json');
+          let changed = false;
+          if (userRole === 'mentor' && mentors[migrateUsername.from]) {
+            mentors[migrateUsername.to] = mentors[migrateUsername.from];
+            delete mentors[migrateUsername.from];
+            changed = true;
+          }
+          for (const key of Object.keys(mentors)) {
+            const arr = mentors[key];
+            if (Array.isArray(arr) && arr.includes(migrateUsername.from)) {
+              mentors[key] = arr.map(x => x === migrateUsername.from ? migrateUsername.to : x);
+              changed = true;
+            }
+          }
+          if (changed) await db.writeRaw('mentors.json', mentors);
+        });
+      }
+
+      // 第 3 步：records.json（学员改名时把历史答题记录同步改归属，避免"记录消失"）
+      if (migrateName) {
+        await db.withLock('records.json', async () => {
+          const records = await db.readJSONRaw('records.json');
+          let changed = false;
+          for (const r of records) {
+            if (r.studentName === migrateName.from) { r.studentName = migrateName.to; changed = true; }
+          }
+          if (changed) await db.writeRaw('records.json', records);
+        });
+      }
+
+      resolve(result);
+    } catch (e) {
+      console.error('[user-edit] error:', e.message);
+      resolve({ error: '修改失败，请重试', status: 500 });
+    }
+  });
+}
+
 // ===== 题库加载（内存缓存 + Supabase 回退，确保数据不丢） =====
 const questionCache = new Map(); // 内存缓存，文件丢失时作为首要回退
 
@@ -584,6 +707,13 @@ app.put('/api/admin/users/:username/reset-password', adminAuth, async (req, res)
   res.json({ success: true });
 });
 
+// 管理员：修改用户（登录用户名/姓名/重置密码）— 用户名与姓名变更会安全迁移关联数据
+app.put('/api/admin/users/:username', adminAuth, async (req, res) => {
+  const result = await applyUserEdit(req.params.username, req.body || {}, req.currentUser);
+  if (!result.success) return res.status(result.status || 400).json({ error: result.error });
+  res.json(result);
+});
+
 // 管理员分配学员给导师
 app.post('/api/admin/assign', adminAuth, async (req, res) => {
   const { mentorUsername, studentUsernames } = req.body;
@@ -642,6 +772,13 @@ app.post('/api/mentor/assign', mentorAuth, async (req, res) => {
   mentors[req.currentUser.username] = valid;
   await db.writeObj('mentors.json', mentors);
   res.json({ success: true, assigned: valid });
+});
+
+// 导师：修改自己名下学员（登录用户名/姓名/重置密码）— 同样带关联数据安全迁移
+app.put('/api/mentor/students/:username', mentorAuth, async (req, res) => {
+  const result = await applyUserEdit(req.params.username, req.body || {}, req.currentUser);
+  if (!result.success) return res.status(result.status || 400).json({ error: result.error });
+  res.json(result);
 });
 
 // ===== 排行榜（只读，学员/导师/管理员均可查看） =====

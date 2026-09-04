@@ -804,7 +804,8 @@ async function submitQuiz(){
   };
 
   try {
-    const res = await api('/api/records', { method:'POST', body:JSON.stringify(record) });
+    // 提交走长超时(60s)：同场多人同时提交时后端按序排队写库，避免排队导致前端误判超时
+    const res = await api('/api/records', { method:'POST', body:JSON.stringify(record), timeout: 60000 });
     if (res.success){
       state.lastRecord = res.record;
       state.page = 'result';
@@ -1192,6 +1193,32 @@ function renderMentorStudents(){
         <button class="btn btn-primary btn-sm" onclick="APP.saveMentorAssignment()">💾 保存分配</button>
         <button class="btn btn-outline btn-sm" onclick="APP.resetMentorSelection()">重置选择</button>
       </div>
+    </div>`;
+
+  // 名下学员账号管理（改名/重置密码，避免学员忘记登录名后无法使用）
+  const studentMap = {};
+  for (const s of students) studentMap[s.username] = s;
+  const managed = assigned.map(u => studentMap[u] || { username: u, name: u });
+  html += `
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">名下学员账号管理</div>
+      <div style="font-size:13px;color:var(--text-sec);margin-bottom:12px">
+        学员忘记登录用户名/密码时，可在此修改或重置（历史成绩自动跟随，不会丢失）。保存分配后才会出现在这里。
+      </div>
+      ${managed.length === 0
+        ? '<div style="color:var(--text-sec);font-size:13px">暂无可管理的学员，请先在上方保存分配</div>'
+        : `<div class="table-wrap"><table class="table">
+            <thead><tr><th>姓名</th><th>登录用户名</th><th>操作</th></tr></thead>
+            <tbody>${managed.map(s => `
+              <tr>
+                <td><strong>${escapeHtml(s.name)}</strong></td>
+                <td style="font-size:13px">${escapeHtml(s.username)}</td>
+                <td>
+                  <button class="btn btn-sm btn-outline" onclick="APP.openUserEditModal('mentor','${jsEscape(s.username)}','${jsEscape(s.name)}')">编辑账号</button>
+                  <button class="btn btn-sm btn-outline" onclick="APP.resetMentorStudentPassword('${jsEscape(s.username)}')">重置密码</button>
+                </td>
+              </tr>`).join('')}</tbody>
+          </table></div>`}
     </div>`;
 
   $('#mentorContent').innerHTML = html;
@@ -2346,8 +2373,9 @@ function renderAdminUsers(){
           <td style="font-size:12px">${u.createdAt ? new Date(u.createdAt).toLocaleString('zh-CN') : '-'}</td>
           <td>
             ${u.username !== 'PC' ? `
-              <button class="btn btn-sm btn-outline" onclick="APP.resetUserPassword('${u.username}')">重置密码</button>
-              <button class="btn btn-sm btn-danger" onclick="APP.deleteUser('${u.username}')">删除</button>
+              <button class="btn btn-sm btn-outline" onclick="APP.openUserEditModal('admin','${jsEscape(u.username)}','${jsEscape(u.name)}')">编辑</button>
+              <button class="btn btn-sm btn-outline" onclick="APP.resetUserPassword('${jsEscape(u.username)}')">重置密码</button>
+              <button class="btn btn-sm btn-danger" onclick="APP.deleteUser('${jsEscape(u.username)}')">删除</button>
             ` : '<span style="font-size:12px;color:var(--text-sec)">超级管理员</span>'}
           </td>
         </tr>`).join('')}</tbody>
@@ -2411,6 +2439,90 @@ async function resetUserPassword(username){
   if (!newPwd || newPwd.length < 4) return;
   try {
     const res = await api(`/api/admin/users/${encodeURIComponent(username)}/reset-password`, {
+      method:'PUT', body:JSON.stringify({ newPassword: newPwd })
+    });
+    if (res.success) showToast('密码已重置','success');
+    else showToast(res.error||'操作失败','error');
+  } catch(e){ showToast('操作失败','error'); }
+}
+
+// ===== 用户账号编辑（改名 / 重置密码，管理员或导师名下学员） =====
+let currentEditName = '';
+
+function openUserEditModal(scope, username, name){
+  currentEditName = name;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:460px">
+      <div class="modal-header">
+        <span>${scope === 'admin' ? '编辑账号' : '编辑学员账号'}</span>
+        <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:12px;color:var(--text-sec);margin-bottom:12px;line-height:1.6">
+          学员忘记登录名时，可改成好记的用户名并重置密码；历史答题成绩会自动跟随新账号，不会丢失。
+          ${scope !== 'admin' ? '（仅能修改你自己名下的学员）' : ''}
+        </div>
+        <div class="form-group">
+          <label class="form-label">登录用户名</label>
+          <input class="form-input" id="editUsername" value="${escapeHtml(username)}" maxlength="20" placeholder="学员登录时使用的用户名">
+        </div>
+        <div class="form-group">
+          <label class="form-label">姓名</label>
+          <input class="form-input" id="editName" value="${escapeHtml(name)}" placeholder="显示在答题记录/排行榜上的姓名">
+        </div>
+        <div class="form-group">
+          <label class="form-label">新密码（留空则不修改）</label>
+          <input class="form-input" id="editPassword" type="password" placeholder="至少4位">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="APP.saveUserEdit('${scope}','${jsEscape(username)}')">保存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function saveUserEdit(scope, oldUsername){
+  const newUsername = $('#editUsername').value.trim();
+  const name = $('#editName').value.trim();
+  const newPassword = $('#editPassword').value;
+  if (!newUsername || !name){ showToast('用户名和姓名不能为空','error'); return; }
+  if (newUsername === oldUsername && name === currentEditName && !newPassword){ showToast('没有需要修改的内容','error'); return; }
+  const body = { newUsername, name };
+  if (newPassword){
+    if (newPassword.length < 4){ showToast('密码至少4位','error'); return; }
+    body.newPassword = newPassword;
+  }
+  try {
+    const path = scope === 'admin'
+      ? `/api/admin/users/${encodeURIComponent(oldUsername)}`
+      : `/api/mentor/students/${encodeURIComponent(oldUsername)}`;
+    const res = await api(path, { method:'PUT', body:JSON.stringify(body) });
+    if (res.success){
+      document.querySelector('.modal-overlay')?.remove();
+      let msg = '账号已更新';
+      if (res.renamed) msg += `，新的登录用户名：${res.user.username}`;
+      showToast(msg,'success');
+      if (scope === 'admin'){
+        await loadAdminUsers();
+        renderAdminUsers();
+      } else {
+        await loadMentorAssignments();
+        await syncAllRecords();
+        renderMentorStudents();
+      }
+    } else { showToast(res.error || '操作失败','error'); }
+  } catch(e){ showToast('操作失败','error'); }
+}
+
+async function resetMentorStudentPassword(username){
+  const newPwd = prompt(`请输入学员 ${username} 的新密码（至少4位）：`);
+  if (!newPwd || newPwd.length < 4) return;
+  try {
+    const res = await api(`/api/mentor/students/${encodeURIComponent(username)}`, {
       method:'PUT', body:JSON.stringify({ newPassword: newPwd })
     });
     if (res.success) showToast('密码已重置','success');
@@ -2547,6 +2659,8 @@ window.APP = {
   deleteRecord, clearAllRecords, exportRecords,
   // 学员管理（导师自主分配）
   toggleMentorStudentChip, saveMentorAssignment, resetMentorSelection,
+  // 用户账号编辑（改名/重置密码）
+  openUserEditModal, saveUserEdit, resetMentorStudentPassword,
   // Question Bank
   renderMentorQuestionBank, filterQBankPanel, searchQBank,
   openEditQuestion, saveEditQuestion, openAddQuestion, saveAddQuestion, deleteQuestion,
