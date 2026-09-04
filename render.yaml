@@ -2,7 +2,7 @@ services:
   - type: web
     name: nova-haidong-quiz-v2
     env: node
-    buildCommand: npm install
+    buildCommand: npm ci --no-audit --no-fund
     startCommand: node server.js
     plan: free
     healthCheckPath: /api/health
