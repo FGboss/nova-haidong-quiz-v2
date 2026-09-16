@@ -1246,6 +1246,20 @@ app.delete('/api/mentor/records', mentorAuth, async (req, res) => {
 
 // ===== 题库管理 =====
 
+// 题库归属判定（唯一实现：题库列表页「本场题量」与导出接口共用，避免两处口径不一致产生 BUG）
+//   带 examId 的题库（新人专项/日常培训，一个文件含多场考试）→ 按 examId 过滤
+//   不带 examId 的题库（技术/销售/客户端/新品，一个文件即一场考试）→ 整份归属该考试
+function resolveExamQuestions(bank, exam) {
+  const list = Array.isArray(bank) ? bank : [];
+  const hasAnyExamId = list.some(q => q.examId);
+  return hasAnyExamId ? list.filter(q => !q.examId || q.examId === exam.id) : list;
+}
+
+// 共用同一题库文件的考试列表（用于提示「整个题库」覆盖了哪几场考试）
+function sharedExamsOf(allExams, exam) {
+  return allExams.filter(e => e.questionFile === exam.questionFile);
+}
+
 app.get('/api/mentor/questions', mentorAuth, async (req, res) => {
   const panel = req.query.panel || 'all';
   const allQuestions = {};
@@ -1255,9 +1269,13 @@ app.get('/api/mentor/questions', mentorAuth, async (req, res) => {
     allQuestions[p] = [];
     const exams = allExams.filter(e => e.panel === p);
     for (const exam of exams) {
+      const bank = loadQuestions(exam.questionFile);
       allQuestions[p].push({
         examId: exam.id, title: exam.title, panel: p,
-        questions: loadQuestions(exam.questionFile)
+        questions: bank,
+        bankCount: bank.length,                              // 题库全部题量
+        examCount: resolveExamQuestions(bank, exam).length,  // 本场考试题量
+        sharedExamIds: sharedExamsOf(allExams, exam).map(e => e.id) // 共用该题库的考试
       });
     }
   }
@@ -1284,43 +1302,55 @@ app.get('/api/mentor/questions/export', mentorAuth, async (req, res) => {
   try {
     const examId = String(req.query.examId || '').trim();
     if (!examId) return res.status(400).json({ error: '缺少考试编号 examId' });
-    const exam = (await getAllExams()).find(e => e.id === examId);
+    const allExams = await getAllExams();
+    const exam = allExams.find(e => e.id === examId);
     if (!exam) return res.status(404).json({ error: '考试不存在' });
 
     // withAnswers=0 → 仅试题（学员打印卷）；默认含参考答案页（导师用）
     const withAnswers = String(req.query.withAnswers == null ? '1' : req.query.withAnswers) !== '0';
+    // scope=exam（默认，兼容既有链接）→ 本场考试题库；scope=bank → 该题库全部题目（供导师手动筛选）
+    const scope = String(req.query.scope || 'exam').trim() === 'bank' ? 'bank' : 'exam';
 
-    // 取题库：与「题库管理」页面完全同源（同一个 loadQuestions），保证导出的就是导师当前看到的题目
+    // 取题库：与「题库管理」页面完全同源（同一个 loadQuestions / resolveExamQuestions），
+    // 保证导师在页面上看到什么，导出的就是什么
     const bank = loadQuestions(exam.questionFile) || [];
-    // 归属判定：带 examId 的题库（新人专项/日常培训，一个文件含多场考试）按 examId 过滤；
-    // 不带 examId 的题库（技术/销售/客户端/新品，一个文件即一场考试）整份导出
-    const hasAnyExamId = bank.some(q => q.examId);
-    const questions = hasAnyExamId ? bank.filter(q => !q.examId || q.examId === exam.id) : bank;
+    const questions = scope === 'bank' ? bank.slice() : resolveExamQuestions(bank, exam);
     if (questions.length === 0) return res.status(404).json({ error: '该考试暂无题目，无法导出' });
 
-    // 懒加载 docx 模块：即使依赖缺失也只让本接口失败，不影响整个系统启动与运行
+    // 懒加载导出模块：即使模块异常也只让本接口失败，不影响整个系统启动与运行
     let buildQuestionBankDocx, safeFileName;
     try {
       ({ buildQuestionBankDocx, safeFileName } = require('./wordExport'));
     } catch (e) {
-      console.error('[questions-export] wordExport/docx 模块不可用:', e.message);
+      console.error('[questions-export] wordExport 模块不可用:', e.message);
       return res.status(500).json({ error: '服务端缺少 Word 导出组件，请稍后重试' });
+    }
+
+    // 导出「整个题库」时标注该题库覆盖了哪几场考试，避免导师误以为只有本场题目
+    let notice = '';
+    if (scope === 'bank') {
+      const shared = sharedExamsOf(allExams, exam);
+      if (shared.length > 1) {
+        notice = `本题库共 ${bank.length} 题，同时供 ${shared.length} 场考试抽题：` + shared.map(e => e.title).join('；');
+      }
     }
 
     const panelLabel = await exportPanelLabel(exam.panel);
     const generatedAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     const buffer = await buildQuestionBankDocx({
-      exam, panelLabel, questions, withAnswers, generatedAt
+      exam, panelLabel, questions, withAnswers, generatedAt, scope, notice
     });
 
     const baseName = safeFileName(exam.title || exam.id);
-    const fname = `${baseName}${withAnswers ? '_题库含答案' : '_试卷'}.docx`;
-    const asciiName = `quiz_bank_${String(exam.id || 'exam').replace(/[^\w.-]/g, '_')}${withAnswers ? '_full' : ''}.docx`;
+    const fname = scope === 'bank'
+      ? `${baseName}_整个题库${questions.length}题${withAnswers ? '_含答案' : '_仅试题'}.docx`
+      : `${baseName}${withAnswers ? '_题库含答案' : '_试卷'}.docx`;
+    const asciiName = `quiz_bank_${String(exam.id || 'exam').replace(/[^\w.-]/g, '_')}${scope === 'bank' ? '_bank' : ''}${withAnswers ? '_full' : ''}.docx`;
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
     res.set('Content-Length', String(buffer.length));
     res.set('Cache-Control', 'no-store');
-    console.log('[questions-export]', exam.id, `题量=${questions.length}`, '含答案=' + withAnswers, `大小=${buffer.length}B`, 'by', req.currentUser && req.currentUser.username);
+    console.log('[questions-export]', exam.id, `范围=${scope}`, `题量=${questions.length}`, '含答案=' + withAnswers, `大小=${buffer.length}B`, 'by', req.currentUser && req.currentUser.username);
     return res.send(buffer);
   } catch (e) {
     console.error('[questions-export] error:', e && e.message);

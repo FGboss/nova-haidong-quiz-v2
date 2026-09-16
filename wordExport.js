@@ -378,9 +378,11 @@ function buildAnswerEntry(q, no) {
  * @param {Object} o
  * @param {Object} o.exam        考试配置（title/id/panel/brand/duration）
  * @param {string} o.panelLabel  板块中文名
- * @param {Array}  o.questions   已归一化到本考试的题目数组
+ * @param {Array}  o.questions   题目数组（调用方已按 scope 决定范围）
  * @param {boolean} o.withAnswers 是否附参考答案与解析
  * @param {string} o.generatedAt  生成时间文本
+ * @param {string} [o.scope]     'exam'（本场考试卷，默认）| 'bank'（整个题库）
+ * @param {string} [o.notice]    scope='bank' 时的补充说明（该题库覆盖哪几场考试）
  * @returns {Buffer} .docx 二进制
  */
 function buildQuestionBankDocx(o) {
@@ -399,7 +401,8 @@ function buildQuestionBankDocx(o) {
 
   // ===== 抬头 =====
   paragraphs.push(p([t(String(exam.title || '题库'), { bold: true, size: 34, font: '黑体' })], { align: 'center', after: 100 }));
-  paragraphs.push(p([t(`题库导出 · ${panelLabel ? panelLabel + ' · ' : ''}共 ${questions.length} 题`, { size: 20, color: '555555' })], { align: 'center', after: 60 }));
+  const scopeLabel = opt.scope === 'bank' ? '完整题库导出' : '题库导出';
+  paragraphs.push(p([t(`${scopeLabel} · ${panelLabel ? panelLabel + ' · ' : ''}共 ${questions.length} 题`, { size: 20, color: '555555' })], { align: 'center', after: 60 }));
 
   const statParts = TYPE_ORDER
     .filter(k => grouped[k].length > 0)
@@ -415,11 +418,19 @@ function buildQuestionBankDocx(o) {
   paragraphs.push(p([t(metaParts.join('　|　'), { size: 19, color: '777777' })], { align: 'center', after: 40 }));
 
   if (generatedAt) {
-    paragraphs.push(p([t(`导出时间：${generatedAt}`, { size: 17, color: '999999' })], { align: 'center', after: 200 }));
+    paragraphs.push(p([t(`导出时间：${generatedAt}`, { size: 17, color: '999999' })], { align: 'center', after: opt.notice ? 40 : 200 }));
   }
 
-  // 打印用填写栏
-  paragraphs.push(p([t('姓名：＿＿＿＿＿＿＿＿　　部门：＿＿＿＿＿＿＿＿　　日期：＿＿＿＿＿＿＿＿　　得分：＿＿＿＿＿＿')], { after: 200 }));
+  // 「整个题库」导出时，说明该题库覆盖了哪几场考试
+  if (opt.notice) {
+    paragraphs.push(p([t(String(opt.notice), { size: 18, color: '999999' })], { align: 'center', after: 200 }));
+  }
+
+  // 打印用填写栏：本场考试卷 或 任何「仅试题」版本都需要（要发给学员做）
+  const needFillBar = opt.scope !== 'bank' || !withAnswers;
+  if (needFillBar) {
+    paragraphs.push(p([t('姓名：＿＿＿＿＿＿＿＿　　部门：＿＿＿＿＿＿＿＿　　日期：＿＿＿＿＿＿＿＿　　得分：＿＿＿＿＿＿')], { after: 200 }));
+  }
 
   // ===== 题目区 =====
   let no = 0;
