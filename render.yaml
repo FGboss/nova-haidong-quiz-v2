@@ -8,6 +8,7 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     # V2.3 - 2026-08-21: 三级二维码扫码功能
+    # V2.4 - 2026-09-16: 导师端题库 Word 导出（可按考试单独导出，供线下打印考核）
     envVars:
       - key: NODE_ENV
         value: production

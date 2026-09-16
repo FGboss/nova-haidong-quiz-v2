@@ -1264,6 +1264,70 @@ app.get('/api/mentor/questions', mentorAuth, async (req, res) => {
   res.json({ success: true, questions: allQuestions, exams: allExams });
 });
 
+// ===== 题库导出为 Word（只读接口：不写库、不改内存缓存、不影响任何现有数据） =====
+// 板块中文名（导出专用，含 training；未收录的模块从 module_config 取 name）
+const EXPORT_PANEL_LABELS = {
+  newbie: '新人专项', training: '新人培训专项（祥雨/伟桀）', tech: '技术进阶',
+  sales: '销售进阶', client: '客户端考核', new_product: '新品考核'
+};
+async function exportPanelLabel(panelId) {
+  if (EXPORT_PANEL_LABELS[panelId]) return EXPORT_PANEL_LABELS[panelId];
+  try {
+    const config = await getModuleConfig();
+    const mod = (config.fixedModules || {})[panelId] || (config.customModules || {})[panelId];
+    if (mod && mod.name) return mod.name;
+  } catch (e) { /* 取不到名称时退回模块 id */ }
+  return panelId || '';
+}
+
+app.get('/api/mentor/questions/export', mentorAuth, async (req, res) => {
+  try {
+    const examId = String(req.query.examId || '').trim();
+    if (!examId) return res.status(400).json({ error: '缺少考试编号 examId' });
+    const exam = (await getAllExams()).find(e => e.id === examId);
+    if (!exam) return res.status(404).json({ error: '考试不存在' });
+
+    // withAnswers=0 → 仅试题（学员打印卷）；默认含参考答案页（导师用）
+    const withAnswers = String(req.query.withAnswers == null ? '1' : req.query.withAnswers) !== '0';
+
+    // 取题库：与「题库管理」页面完全同源（同一个 loadQuestions），保证导出的就是导师当前看到的题目
+    const bank = loadQuestions(exam.questionFile) || [];
+    // 归属判定：带 examId 的题库（新人专项/日常培训，一个文件含多场考试）按 examId 过滤；
+    // 不带 examId 的题库（技术/销售/客户端/新品，一个文件即一场考试）整份导出
+    const hasAnyExamId = bank.some(q => q.examId);
+    const questions = hasAnyExamId ? bank.filter(q => !q.examId || q.examId === exam.id) : bank;
+    if (questions.length === 0) return res.status(404).json({ error: '该考试暂无题目，无法导出' });
+
+    // 懒加载 docx 模块：即使依赖缺失也只让本接口失败，不影响整个系统启动与运行
+    let buildQuestionBankDocx, safeFileName;
+    try {
+      ({ buildQuestionBankDocx, safeFileName } = require('./wordExport'));
+    } catch (e) {
+      console.error('[questions-export] wordExport/docx 模块不可用:', e.message);
+      return res.status(500).json({ error: '服务端缺少 Word 导出组件，请稍后重试' });
+    }
+
+    const panelLabel = await exportPanelLabel(exam.panel);
+    const generatedAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    const buffer = await buildQuestionBankDocx({
+      exam, panelLabel, questions, withAnswers, generatedAt
+    });
+
+    const baseName = safeFileName(exam.title || exam.id);
+    const fname = `${baseName}${withAnswers ? '_题库含答案' : '_试卷'}.docx`;
+    const asciiName = `quiz_bank_${String(exam.id || 'exam').replace(/[^\w.-]/g, '_')}${withAnswers ? '_full' : ''}.docx`;
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+    res.set('Content-Length', String(buffer.length));
+    res.set('Cache-Control', 'no-store');
+    console.log('[questions-export]', exam.id, `题量=${questions.length}`, '含答案=' + withAnswers, `大小=${buffer.length}B`, 'by', req.currentUser && req.currentUser.username);
+    return res.send(buffer);
+  } catch (e) {
+    console.error('[questions-export] error:', e && e.message);
+    return res.status(500).json({ error: '导出失败，请重试' });
+  }
+});
+
 app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, res) => {
   const { examId, questionId } = req.params;
   const updated = req.body;

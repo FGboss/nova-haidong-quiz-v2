@@ -1554,9 +1554,12 @@ function renderQBankContent(){
       if (questions.length === 0) continue;
 
       html += `<div class="card" style="margin-bottom:12px">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <span>${escapeHtml(g.title)} <span style="font-size:12px;color:var(--text-sec);font-weight:400">（${questions.length}题）</span></span>
-          <button class="btn btn-sm btn-primary" onclick="APP.openAddQuestion('${p}','${g.examId}','${jsEscape(g.title)}')">+ 新增题目</button>
+          <span style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-sm btn-success" onclick="APP.openExportQuestionBank('${jsEscape(g.examId)}','${jsEscape(g.title)}')" title="导出该考试题库为 Word，可线下打印做题">📄 导出Word</button>
+            <button class="btn btn-sm btn-primary" onclick="APP.openAddQuestion('${p}','${g.examId}','${jsEscape(g.title)}')">+ 新增题目</button>
+          </span>
         </div>
         <div style="max-height:600px;overflow-y:auto">
           ${questions.map((q,i) => {
@@ -1594,6 +1597,90 @@ function renderQBankContent(){
 
 function filterQBankPanel(panel){ _qbankPanel = panel; renderQBankContent(); }
 function searchQBank(val){ _qbankSearch = val; renderQBankContent(); }
+
+// ===== 题库导出 Word（导师用，导出后可线下打印做题）=====
+function openExportQuestionBank(examId, title){
+  document.querySelectorAll('.modal-overlay.exp-qbank').forEach(el => el.remove());
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay exp-qbank';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:480px">
+      <div class="modal-header">
+        <span>导出 Word 题库</span>
+        <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:14px;font-weight:700;margin-bottom:4px">${escapeHtml(title)}</div>
+        <div style="font-size:12px;color:var(--text-sec);margin-bottom:14px">导出为 Word 文档（.docx），可线下打印用于纸质考核</div>
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1.5px solid var(--primary);border-radius:8px;cursor:pointer;margin-bottom:10px">
+          <input type="radio" name="expQbankMode" value="1" checked style="margin-top:3px">
+          <span>
+            <span style="display:block;font-weight:600;font-size:13px">含参考答案与解析（导师用）</span>
+            <span style="display:block;font-size:12px;color:var(--text-sec);margin-top:2px">试题 + 文末单独一页参考答案，方便批改</span>
+          </span>
+        </label>
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer">
+          <input type="radio" name="expQbankMode" value="0" style="margin-top:3px">
+          <span>
+            <span style="display:block;font-weight:600;font-size:13px">仅试题（学员打印卷）</span>
+            <span style="display:block;font-size:12px;color:var(--text-sec);margin-top:2px">不含任何答案，可直接打印发给学员做题</span>
+          </span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" id="expQbankBtn" onclick="APP.doExportQuestionBank('${jsEscape(examId)}','${jsEscape(title)}')">下载 Word</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  // 选中态高亮跟随单选项
+  overlay.querySelectorAll('input[name="expQbankMode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      overlay.querySelectorAll('label').forEach(l => l.style.borderColor = 'var(--border)');
+      r.closest('label').style.borderColor = 'var(--primary)';
+    });
+  });
+}
+
+async function doExportQuestionBank(examId, title){
+  const btn = $('#expQbankBtn');
+  const sel = document.querySelector('input[name="expQbankMode"]:checked');
+  const withAnswers = sel ? sel.value : '1';
+  if (btn){ btn.disabled = true; btn.textContent = '生成中...'; }
+  try {
+    const url = `${API_BASE}/api/mentor/questions/export?examId=${encodeURIComponent(examId)}&withAnswers=${withAnswers}`;
+    const resp = await fetch(url, { headers: state.authToken ? { 'x-auth-token': state.authToken } : {} });
+    if (!resp.ok){
+      let msg = '导出失败';
+      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch(e){}
+      showToast(msg, 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    // 文件名优先取服务端 Content-Disposition（含中文考试名）
+    let fname = `${title}${withAnswers === '0' ? '_试卷' : '_题库含答案'}.docx`;
+    const cd = resp.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    if (m){ try { fname = decodeURIComponent(m[1]); } catch(e){} }
+    // 兜底：服务端未返回文件名时按考试名构造
+    if (!/\.docx$/i.test(fname)) fname = `${title}.docx`;
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+    const ov = document.querySelector('.modal-overlay.exp-qbank');
+    if (ov) ov.remove();
+    showToast('导出成功，已开始下载', 'success');
+  } catch(e){
+    showToast('导出失败：' + e.message, 'error');
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = '下载 Word'; }
+  }
+}
 
 async function openEditQuestion(panel, examId, questionId){
   const group = (_qbankData.questions[panel]||[]).find(g => g.examId === examId);
@@ -2671,6 +2758,7 @@ window.APP = {
   openUserEditModal, saveUserEdit, resetMentorStudentPassword,
   // Question Bank
   renderMentorQuestionBank, filterQBankPanel, searchQBank,
+  openExportQuestionBank, doExportQuestionBank,
   openEditQuestion, saveEditQuestion, openAddQuestion, saveAddQuestion, deleteQuestion,
   // Weak Areas
   renderMentorWeakAreas, viewStudentWeakDetail,
