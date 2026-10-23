@@ -369,6 +369,71 @@ async function doRegister(username, password, name){
   } catch(e){ showToast('网络错误','error'); }
 }
 
+function openChangePassModal(){
+  if(!state.currentUser){ showToast('请先登录','error'); return; }
+  renderChangePassModalHtml();
+}
+
+function renderChangePassModalHtml(){
+  const user = state.currentUser;
+  const overlay = document.createElement('div');
+  overlay.id = 'changePassOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:12px;width:360px;max-width:92vw;padding:22px 24px;box-shadow:0 10px 40px rgba(0,0,0,.25);font-family:inherit;">' +
+      '<h3 style="margin:0 0 4px;font-size:18px;color:#1f2937;">修改密码</h3>' +
+      '<p style="margin:0 0 16px;font-size:13px;color:#9ca3af;">账号：<b style="color:#374151;">' + escapeHtml(user.name) + '（' + escapeHtml(user.username) + '）</b></p>' +
+      '<div style="display:flex;flex-direction:column;gap:12px;">' +
+        '<input id="chgOld" type="password" placeholder="原密码" style="padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;">' +
+        '<input id="chgNew" type="password" placeholder="新密码（至少 4 位）" style="padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;">' +
+        '<input id="chgNew2" type="password" placeholder="确认新密码" style="padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;">' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">' +
+        '<button data-act="cancel" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:8px;cursor:pointer;font-size:14px;">取消</button>' +
+        '<button data-act="ok" style="padding:9px 18px;border:none;background:#2563eb;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;">确认修改</button>' +
+      '</div>' +
+      '<p id="chgMsg" style="margin:12px 0 0;font-size:13px;color:#dc2626;min-height:18px;"></p>' +
+    '</div>';
+  overlay.addEventListener('click', (e) => {
+    if(e.target === overlay){ e.target.remove(); }
+    const act = e.target.getAttribute && e.target.getAttribute('data-act');
+    if(act === 'cancel'){ overlay.remove(); }
+    if(act === 'ok'){ submitChangePass(overlay); }
+  });
+  document.body.appendChild(overlay);
+}
+
+async function submitChangePass(overlay){
+  const msg = overlay.querySelector('#chgMsg');
+  const oldP = overlay.querySelector('#chgOld').value;
+  const newP = overlay.querySelector('#chgNew').value;
+  const newP2 = overlay.querySelector('#chgNew2').value;
+  if(!oldP || !newP || !newP2){ msg.textContent = '请填写完整'; return; }
+  if(newP.length < 4){ msg.textContent = '新密码至少 4 位'; return; }
+  if(newP !== newP2){ msg.textContent = '两次新密码不一致'; return; }
+  if(newP === oldP){ msg.textContent = '新密码不能与旧密码相同'; return; }
+  msg.textContent = '提交中…';
+  try{
+    const resp = await fetch('/api/auth/password', {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json', 'Authorization': 'Bearer ' + (state.authToken || '') },
+      body: JSON.stringify({ oldPassword: oldP, newPassword: newP })
+    });
+    const data = await resp.json();
+    if(data && data.success){
+      msg.style.color = '#16a34a';
+      msg.textContent = '密码修改成功，已同步，超管可实时看到最新密码';
+      overlay.querySelector('#chgOld').value='';
+      overlay.querySelector('#chgNew').value='';
+      overlay.querySelector('#chgNew2').value='';
+      setTimeout(()=>{ overlay.remove(); }, 1400);
+    } else {
+      msg.style.color = '#dc2626';
+      msg.textContent = data && data.error ? data.error : '修改失败';
+    }
+  }catch(e){ msg.style.color = '#dc2626'; msg.textContent = '网络错误，请重试'; }
+}
+
 function logout(){
   clearInterval(state.quizTimer);
   state.authToken = null;
@@ -418,6 +483,7 @@ async function renderHome(app){
           ${isAdmin ? `<button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.goAdmin()">用户管理</button>` : ''}
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.openLeaderboard()">🏆 排行榜</button>
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.viewMyRecords()">我的记录</button>
+          <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.openChangePassModal()">修改密码</button>
           <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="APP.logout()">退出</button>
         </div>
       </div>
@@ -2887,6 +2953,8 @@ window.APP = {
   toggleMentorStudentChip, saveMentorAssignment, resetMentorSelection,
   // 用户账号编辑（改名/重置密码）
   openUserEditModal, saveUserEdit, resetMentorStudentPassword,
+  // 用户自助改密
+  openChangePassModal,
   // Question Bank
   renderMentorQuestionBank, filterQBankPanel, searchQBank,
   openExportQuestionBank, doExportQuestionBank,
