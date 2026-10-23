@@ -52,7 +52,7 @@ async function initSuperAdmin() {
   if (!users['PC']) {
     users['PC'] = {
       username: 'PC',
-      password: crypto.createHash('sha256').update('password123').digest('hex'),
+      password: 'password123', // 明文（超管可查看）
       role: 'admin',
       name: '超级管理员',
       createdAt: new Date().toISOString()
@@ -182,14 +182,9 @@ function applyUserEdit(oldUsername, patch, editor) {
           if (users[newUsername]) { result = { error: `用户名「${newUsername}」已被占用`, status: 400 }; return; }
           if (userRole === 'admin') { result = { error: '不能修改管理员账号的用户名', status: 400 }; return; }
         }
-        // 姓名唯一性：答题记录按姓名归属，学员重名会导致历史成绩合并错乱
-        if (finalName !== user.name && userRole === 'student') {
-          const clash = Object.values(users).find(u => u !== user && u.role === 'student' && u.name === finalName);
-          if (clash) { result = { error: `已有学员使用姓名「${finalName}」，为避免成绩串号请换一个姓名`, status: 400 }; return; }
-        }
-
+        // 允许重名（同名多账号合法，后台统计按姓名合并、登录遇重名提示用用户名区分）
         const updated = { ...user, name: finalName };
-        if (newPassword !== null) updated.password = hashPassword(newPassword);
+        if (newPassword !== null) updated.password = newPassword; // 明文存储（超管可查看/导出）
 
         let finalUsername = oldUsername;
         if (newUsername !== null && newUsername !== oldUsername) {
@@ -589,7 +584,7 @@ app.post('/api/auth/register', async (req, res) => {
     const token = generateToken();
     users[username] = {
       username, name: name.trim(),
-      password: hashPassword(password),
+      password, // 明文存储（超管可查看/导出；内部考核场景采用）
       role: 'student',
       token,
       createdAt: new Date().toISOString()
@@ -601,19 +596,38 @@ app.post('/api/auth/register', async (req, res) => {
   res.json({ success: true, user: result });
 });
 
-// 学员登录
+// 登录 — 支持「用户名 + 密码」或「姓名 + 密码」
+// 匹配规则：
+//   1) 优先按用户名精确匹配；
+//   2) 用户名匹配不到时，按姓名匹配；姓名唯一 → 登录成功；重复姓名 → 提示用用户名登录，避免歧义。
+// 密码校验：兼容明文密码（password 字段为明文，超管可查看/导出）与历史哈希（旧账号为 SHA-256）。
+function checkPassword(user, input) {
+  if (!user || !user.password) return false;
+  if (user.password === input) return true;              // 明文匹配
+  if (user.password === hashPassword(input)) return true; // 历史哈希兜底
+  return false;
+}
+
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: '请输入用户名和密码' });
+  if (!username || !password) return res.status(400).json({ error: '请输入用户名（或姓名）和密码' });
   
   const users = await db.readObjRaw('users.json');
-  const user = users[username];
-  if (!user) return res.status(401).json({ error: '用户名不存在' });
-  if (user.password !== hashPassword(password)) return res.status(401).json({ error: '密码错误' });
-  
+  let user = users[username];
+
+  if (!user) {
+    // 按姓名匹配
+    const byName = Object.values(users).filter(u => u.name === username);
+    if (byName.length === 0) return res.status(401).json({ error: '账号不存在，请核对用户名或姓名' });
+    if (byName.length > 1) return res.status(401).json({ error: `该姓名对应 ${byName.length} 个账号，请改用用户名登录` });
+    user = byName[0];
+  }
+
+  if (!checkPassword(user, password)) return res.status(401).json({ error: '密码错误' });
+
   const token = generateToken();
   user.token = token;
-  users[username] = user;
+  users[user.username] = user;
   await db.writeRaw('users.json', users);
   
   res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, token } });
@@ -633,9 +647,9 @@ app.put('/api/auth/password', authMiddleware, async (req, res) => {
   
   const users = await db.readObj('users.json');
   const user = users[req.currentUser.username];
-  if (user.password !== hashPassword(oldPassword)) return res.status(400).json({ error: '原密码错误' });
+  if (!checkPassword(user, oldPassword)) return res.status(400).json({ error: '原密码错误' });
   
-  user.password = hashPassword(newPassword);
+  user.password = newPassword; // 明文存储
   users[req.currentUser.username] = user;
   await db.writeObj('users.json', users);
   res.json({ success: true });
@@ -653,7 +667,7 @@ app.post('/api/admin/mentors', adminAuth, async (req, res) => {
   
   users[username] = {
     username, name: name.trim(),
-    password: hashPassword(password),
+    password, // 明文存储（超管可查看/导出）
     role: 'mentor',
     createdAt: new Date().toISOString()
   };
@@ -666,10 +680,14 @@ app.get('/api/admin/users', adminAuth, async (req, res) => {
   const users = await db.readObj('users.json');
   const list = Object.values(users)
     .filter(u => u.username && u.role)
-    .map(u => ({ username: u.username, name: u.name, role: u.role, createdAt: u.createdAt }));
+    .map(u => ({ username: u.username, name: u.name, role: u.role, createdAt: u.createdAt, password: u.password || '' }));
   const mentors = await db.readObj('mentors.json');
+  // 附带重名提示（同名多账号检测）
+  const nameCount = {};
+  for (const u of list) nameCount[u.name] = (nameCount[u.name] || 0) + 1;
   // 附加导师-学员关系
   for (const u of list) {
+    u.duplicateName = (nameCount[u.name] || 0) > 1;
     if (u.role === 'mentor') {
       u.assignedStudents = (mentors[u.username] || []);
     }
@@ -702,7 +720,7 @@ app.put('/api/admin/users/:username/reset-password', adminAuth, async (req, res)
   if (!newPassword || newPassword.length < 4) return res.status(400).json({ error: '新密码至少4位' });
   const users = await db.readObj('users.json');
   if (!users[req.params.username]) return res.status(404).json({ error: '用户不存在' });
-  users[req.params.username].password = hashPassword(newPassword);
+  users[req.params.username].password = newPassword; // 明文存储
   await db.writeObj('users.json', users);
   res.json({ success: true });
 });
@@ -712,6 +730,62 @@ app.put('/api/admin/users/:username', adminAuth, async (req, res) => {
   const result = await applyUserEdit(req.params.username, req.body || {}, req.currentUser);
   if (!result.success) return res.status(result.status || 400).json({ error: result.error });
   res.json(result);
+});
+
+// 管理员：一键重置全部账号密码（保留超级管理员 PC 不动）
+app.post('/api/admin/users/reset-all', adminAuth, async (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 4) return res.status(400).json({ error: '请提供至少4位的新密码' });
+  let count = 0;
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    for (const u of Object.values(users)) {
+      if (u.username === 'PC') continue; // 超级管理员不重置
+      u.password = newPassword; // 明文存储
+      users[u.username] = u;
+      count++;
+    }
+    await db.writeRaw('users.json', users);
+  });
+  res.json({ success: true, resetCount: count });
+});
+
+// 管理员：导出全部账号（含密码、导师、重名标记）为 Excel
+app.get('/api/admin/users/export', adminAuth, async (req, res) => {
+  const users = await db.readObj('users.json');
+  const mentors = await db.readObj('mentors.json');
+  const rows = [];
+  for (const u of Object.values(users)) {
+    if (!u.username || !u.role) continue;
+    let assignedMentor = '-';
+    if (u.role === 'student') {
+      for (const [mname, students] of Object.entries(mentors)) {
+        if (students.includes(u.username)) { assignedMentor = mname; break; }
+      }
+    }
+    // 超管密码不导出（避免把超管哈希/密码明文外泄），其余账号导出明文密码
+    const pwdCell = (u.role === 'admin') ? '(超管，不导出)' : (u.password !== undefined && u.password !== null ? String(u.password) : '');
+    rows.push({
+      用户名: u.username,
+      姓名: u.name || '',
+      角色: u.role === 'admin' ? '超级管理员' : (u.role === 'mentor' ? '导师' : '学员'),
+      导师: assignedMentor,
+      密码: pwdCell,
+      创建时间: u.createdAt ? new Date(u.createdAt).toLocaleString('zh-CN') : '-'
+    });
+  }
+  try {
+    const XLSX = require('xlsx');
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '账号');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=users_${Date.now()}.xlsx`);
+    res.send(Buffer.from(buf));
+  } catch (e) {
+    res.status(500).json({ error: '导出失败：' + e.message });
+  }
 });
 
 // 管理员分配学员给导师

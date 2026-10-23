@@ -261,8 +261,8 @@ function renderLoginForm(tab){
   if (tab === 'login'){
     form.innerHTML = `
       <div class="form-group">
-        <label class="form-label">用户名</label>
-        <input class="form-input" id="loginUsername" placeholder="输入用户名" autofocus>
+        <label class="form-label">用户名 或 姓名</label>
+        <input class="form-input" id="loginUsername" placeholder="输入用户名或姓名" autofocus>
       </div>
       <div class="form-group">
         <label class="form-label">密码</label>
@@ -277,7 +277,7 @@ function renderLoginForm(tab){
       const doLogin = () => {
         const username = userEl.value.trim();
         const password = pwdEl.value;
-        if (!username || !password) { showToast('请输入用户名和密码','error'); return; }
+        if (!username || !password) { showToast('请输入用户名（或姓名）和密码','error'); return; }
         APP.doLogin(username, password);
       };
       pwdEl.addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
@@ -2489,9 +2489,13 @@ function switchAdminTab(tab){ state.adminTab = tab; render(); }
 function renderAdminUsers(){
   const users = state.adminUsers;
   let html = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <span style="font-size:14px;color:var(--text-sec)">共 ${users.length} 名用户</span>
-      <button class="btn btn-sm btn-primary" onclick="APP.openCreateMentor()">+ 创建导师</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-outline" onclick="APP.exportAllUsers()">⬇ 导出全部账号</button>
+        <button class="btn btn-sm btn-outline" onclick="APP.resetAllUserPasswords()">🔄 一键重置全部密码</button>
+        <button class="btn btn-sm btn-primary" onclick="APP.openCreateMentor()">+ 创建导师</button>
+      </div>
     </div>`;
 
   if (users.length === 0){
@@ -2501,7 +2505,7 @@ function renderAdminUsers(){
       <thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>导师</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody>${users.map(u => `
         <tr>
-          <td><strong>${escapeHtml(u.username)}</strong></td>
+          <td><strong>${escapeHtml(u.username)}</strong>${u.duplicateName ? ` <span class="badge badge-warning" title="存在同名账号，登录时须用用户名区分">重名</span>` : ''}</td>
           <td>${escapeHtml(u.name)}</td>
           <td><span class="badge ${u.role==='admin'?'badge-danger':u.role==='mentor'?'badge-tech':'badge-success'}">${u.role==='admin'?'管理员':u.role==='mentor'?'导师':'学员'}</span></td>
           <td style="font-size:12px">${u.assignedMentor ? escapeHtml(u.assignedMentor) : '-'}</td>
@@ -2509,6 +2513,7 @@ function renderAdminUsers(){
           <td>
             ${u.username !== 'PC' ? `
               <button class="btn btn-sm btn-outline" onclick="APP.openUserEditModal('admin','${jsEscape(u.username)}','${jsEscape(u.name)}')">编辑</button>
+              <button class="btn btn-sm btn-outline" onclick="APP.viewUserPassword('${jsEscape(u.username)}','${jsEscape(u.password||'')}')">🔑 查看密码</button>
               <button class="btn btn-sm btn-outline" onclick="APP.resetUserPassword('${jsEscape(u.username)}')">重置密码</button>
               <button class="btn btn-sm btn-danger" onclick="APP.deleteUser('${jsEscape(u.username)}')">删除</button>
             ` : '<span style="font-size:12px;color:var(--text-sec)">超级管理员</span>'}
@@ -2518,6 +2523,92 @@ function renderAdminUsers(){
   }
 
   $('#adminContent').innerHTML = html;
+
+  // 提示一键重置/导出的密码说明
+  setTimeout(() => {
+    const note = document.createElement('div');
+    note.style.cssText = 'margin-top:12px;font-size:12px;color:var(--text-sec);line-height:1.6';
+    note.innerHTML = `提示：密码为明文存储，仅超管可见。「一键重置全部密码」会把除超级管理员外的所有账号密码改为统一初始密码，便于统一照告知，学员登录后可自行修改。`;
+    const wrap = document.querySelector('#adminContent');
+    if (wrap && !wrap.querySelector('.pwd-note')) { note.className='pwd-note'; wrap.appendChild(note); }
+  }, 0);
+}
+
+// ===== 管理端：查看/复制密码、导出、一键重置 =====
+function viewUserPassword(username, password){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:440px">
+      <div class="modal-header">
+        <span>查看密码</span>
+        <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">用户名</label>
+          <input class="form-input" value="${escapeHtml(username)}" readonly>
+        </div>
+        <div class="form-group">
+          <label class="form-label">当前密码</label>
+          <input class="form-input" id="viewPwdValue" value="${escapeHtml(password||'')}" readonly>
+        </div>
+        <div style="font-size:12px;color:var(--text-sec);line-height:1.6">
+          可复制此密码告知用户；对方登录后可自行修改。&nbsp;
+          （警告：明文密码请妥善保管，仅限内部使用）
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+        <button class="btn btn-primary" onclick="APP.copyUserPassword()">📋 复制密码</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function copyUserPassword(){
+  const el = $('#viewPwdValue');
+  if (!el) return;
+  const val = el.value || '';
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(val).then(() => showToast('密码已复制','success')).catch(() => fallbackCopy(val));
+  } else fallbackCopy(val);
+}
+function fallbackCopy(val){
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = val; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+    showToast('密码已复制','success');
+  } catch(e){ showToast('复制失败，请手动复制','error'); }
+}
+async function exportAllUsers(){
+  try {
+    const headers = { };
+    if (state.authToken) headers['x-auth-token'] = state.authToken;
+    const resp = await fetch(API_BASE + '/api/admin/users/export', { headers });
+    if (!resp.ok){
+      const j = await resp.json().catch(() => ({}));
+      showToast(j.error || '导出失败','error'); return;
+    }
+    const buf = await resp.arrayBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `账号清单_${new Date().toISOString().slice(0,10)}.xlsx`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+    showToast('导出成功','success');
+  } catch(e){ showToast('导出失败','error'); }
+}
+async function resetAllUserPasswords(){
+  const newPwd = prompt('请输入要重置的统一密码（至少4位），所有非超管账号都将改为该密码：', '123456');
+  if (!newPwd || newPwd.length < 4) return;
+  if (!confirm(`确认将全部 ${state.adminUsers.filter(u=>u.username!=='PC').length} 名用户的密码重置为「${newPwd}」吗？`)) return;
+  try {
+    const r = await api('/api/admin/users/reset-all', { method:'POST', body:JSON.stringify({ newPassword: newPwd }) });
+    if (r.success){ showToast(`已重置 ${r.resetCount} 名用户密码`,'success'); await loadAdminUsers(); renderAdminUsers(); }
+    else showToast(r.error||'操作失败','error');
+  } catch(e){ showToast('操作失败','error'); }
 }
 
 function openCreateMentor(){
@@ -2808,6 +2899,8 @@ window.APP = {
   // Admin
   openCreateMentor, createMentor, resetUserPassword, deleteUser,
   toggleStudentChip, saveAssignment,
+  // Admin 账号/密码管理
+  viewUserPassword, copyUserPassword, exportAllUsers, resetAllUserPasswords,
   // QR Code
   showQRModal, showToast,
   // Leaderboard
