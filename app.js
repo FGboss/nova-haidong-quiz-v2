@@ -414,12 +414,10 @@ async function submitChangePass(overlay){
   if(newP === oldP){ msg.textContent = '新密码不能与旧密码相同'; return; }
   msg.textContent = '提交中…';
   try{
-    const resp = await fetch('/api/auth/password', {
+    const data = await api('/api/auth/password', {
       method:'PUT',
-      headers:{ 'Content-Type':'application/json', 'Authorization': 'Bearer ' + (state.authToken || '') },
       body: JSON.stringify({ oldPassword: oldP, newPassword: newP })
     });
-    const data = await resp.json();
     if(data && data.success){
       msg.style.color = '#16a34a';
       msg.textContent = '密码修改成功，已同步，超管可实时看到最新密码';
