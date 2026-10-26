@@ -18,17 +18,19 @@ function reminderBanner(compact){
     <span>${REMINDER_TEXT}</span>
   </div>`;
 }
-const PANEL_LABELS = { newbie:'新人专项', training:'新人培训专项（祥雨/伟桀）', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核' };
-const PANEL_COLORS = { newbie:'newbie', training:'training', tech:'tech', sales:'sales', client:'client', new_product:'new-product' };
-const PANEL_ICONS = { newbie:'📚', training:'🎓', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕' };
+const PANEL_LABELS = { newbie:'新人专项', training:'新人培训专项（祥雨/伟桀）', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核', scene:'场景化赋能专项' };
+const PANEL_COLORS = { newbie:'newbie', training:'training', tech:'tech', sales:'sales', client:'client', new_product:'new-product', scene:'scene' };
+const PANEL_ICONS = { newbie:'📚', training:'🎓', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕', scene:'🎯' };
 const PANEL_DESCS = {
   newbie:'3周系统培训考核，每日一考+周考，15套试卷覆盖产品基础知识',
   training:'嗨动产品线新人培训考核，5大产品系列，按百分比评分+随机出题',
   tech:'按产品系列深度考核，涵盖参数、性能、技术排查和系统架构',
   sales:'按产品系列考核，侧重方案搭配、选型推荐和场景应用能力',
   client:'客户现场培训考核，按产品系列出题，模拟纸质试卷模式',
-  new_product:'新品培训考核，持续更新中'
+  new_product:'新品培训考核，持续更新中',
+  scene:'音视频集成场景化赋能：8周任务卡 + 4场固定卷考核 + 结业答辩，独立通过线'
 };
+const SCENE_EXAM_LABELS = { sceneA:'阶段测一 · 拆场景', sceneB:'阶段测二 · 出方案', sceneC:'阶段测三 · 讲方案', sceneD:'结业综合卷' };
 const TYPE_LABELS = { single:'单选题', multiple:'多选题', judge:'判断题', short:'简答题' };
 
 // ===== 状态 =====
@@ -458,7 +460,7 @@ async function renderHome(app){
   } catch(e) { console.error('load modules:', e); }
 
   // Build panel list
-  const fixedPanels = ['newbie', 'training', 'tech', 'sales', 'client'];
+  const fixedPanels = ['newbie', 'training', 'tech', 'sales', 'client', 'scene'];
   const dynamicPanels = [];
   for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
     if (fixedPanels.includes(id)) continue;
@@ -511,11 +513,17 @@ function renderPanelCard(panel){
       <div class="panel-icon">${PANEL_ICONS[panel]||'📋'}</div>
       <div class="panel-title">${PANEL_LABELS[panel]||panel}</div>
       <div class="panel-desc">${PANEL_DESCS[panel]||''}</div>
+      ${panel === 'scene' ? `
+      <div class="panel-meta">
+        <span class="badge badge-scene">4套固定卷</span>
+        <span class="badge badge-scene">通过线70/75</span>
+        <span class="badge badge-scene">14张任务卡</span>
+      </div>` : `
       <div class="panel-meta">
         <span class="badge badge-${panel}">${examCounts[panel]||8}套考试</span>
         <span class="badge badge-${panel}">18题/套</span>
         <span class="badge badge-${panel}">${PASSING_SCORE}分及格</span>
-      </div>
+      </div>`}
     </div>`;
 }
 
@@ -586,6 +594,12 @@ function renderPanel(app){
   const panelName = state.panelInfo ? state.panelInfo.name : (PANEL_LABELS[panel] || '考核');
   const panelQrUrl = `${baseUrl}?panel=${panel}`;
 
+  // 场景化赋能专项：独立渲染（顶层推进区 + 固定卷考试 + 结业答辩）
+  if (panel === 'scene'){
+    renderScenePanel(app);
+    return;
+  }
+
   let sections = '';
   if (panel === 'newbie'){
     const weeks = [1,2,3];
@@ -645,13 +659,14 @@ function renderPanel(app){
 function renderExamList(exams){
   const baseUrl = getBaseUrl();
   const panel = state.panel;
+  const isScene = panel === 'scene';
   return `<div class="exam-list">${exams.map(e => {
     const qrUrl = `${baseUrl}?panel=${panel}&exam=${e.id}`;
     return `
     <div class="exam-item${e._blocked ? ' blocked' : ''}" data-exam-id="${e.id}">
       <div class="exam-item-info">
         <div class="exam-item-title">${escapeHtml(e.title)}</div>
-        <div class="exam-item-desc">${e.totalQuestions}题 · ${e.duration}分钟 · ${e._blocked ? '已达上限' : (e._attempts > 0 ? `已答${e._attempts}次` : '未答')}</div>
+        <div class="exam-item-desc">${e.totalQuestions}题 · ${e.duration}分钟${isScene ? ` · 通过${e.passScore || 70}分` : ''} · ${e._blocked ? '已达上限' : (e._attempts > 0 ? `已答${e._attempts}次` : '未答')}</div>
       </div>
       <div class="exam-item-meta">
         <button class="qr-btn qr-btn-sm" onclick="event.stopPropagation();APP.showQRModal('${escapeHtml(e.title)}','${qrUrl}','扫码直接进入考试「${escapeHtml(e.title)}」')" title="扫码进入此考试">📱</button>
@@ -2971,9 +2986,390 @@ window.APP = {
   showQRModal, showToast,
   // Leaderboard
   openLeaderboard, switchLbPanel,
+  // 场景化赋能专项
+  renderScenePanel, updateSceneTask, openSceneStudentsModal,
+  openDefenseListModal, openSceneDefenseModal, deleteSceneDefense,
   // Render
   render
 };
+
+// ================= 场景化赋能专项 · 前端 =================
+let sceneCache = null;
+let sceneDefenseMeta = null;
+let sceneDefenseRecords = [];
+
+// 通用场景弹窗
+function sceneModal(html, onAction){
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;overflow:auto;padding:20px;';
+  overlay.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:660px;width:100%;max-height:88vh;overflow:auto;padding:22px 24px;box-shadow:0 10px 40px rgba(0,0,0,.25);">' + html + '</div>';
+  overlay.addEventListener('click', (e) => {
+    if(e.target === overlay){ overlay.remove(); return; }
+    const act = e.target.getAttribute && e.target.getAttribute('data-act');
+    if(act === 'close' || act === 'cancel'){ overlay.remove(); return; }
+    if(act && onAction){ onAction(act, overlay, e); }
+  });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+function sceneOverlayBar(title, hint){
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<h3 style="margin:0;font-size:18px;color:#1f2937;">' + title + '</h3>' +
+    '<button data-act="close" style="padding:6px 12px;border:1px solid #d1d5db;background:#fff;color:#4b5563;border-radius:8px;cursor:pointer;font-size:13px;">✕ 关闭</button>' +
+    '</div>' + (hint ? '<p style="margin:0 0 12px;font-size:12px;color:#9ca3af;">' + hint + '</p>' : '');
+}
+
+async function renderScenePanel(app){
+  const user = state.currentUser;
+  const isManager = (user.role === 'mentor' || user.role === 'admin');
+  const exams = state.exams || [];
+  const baseUrl = getBaseUrl();
+
+  let ov = null;
+  if(isManager){
+    try{
+      const r = await api('/api/scene/overview');
+      if(r && r.success){ ov = r; sceneCache = r; }
+    }catch(e){ console.error('scene overview:', e); }
+  }
+
+  const header = `
+    <div class="header">
+      <div class="header-inner">
+        <div>
+          <div class="nav-back" onclick="APP.goHome()">← 返回首页</div>
+          <h1 style="margin-top:4px">🎯 场景化赋能专项</h1>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="qr-btn qr-btn-white" onclick="APP.showQRModal('场景化赋能专项','${baseUrl}?panel=scene','扫码直接进入场景化赋能专项考核')" title="扫码分享此模块">📱</button>
+          <span style="font-size:13px;opacity:.9">${escapeHtml(user.name)}</span>
+          <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3);margin-left:8px" onclick="APP.goHome()">返回</button>
+        </div>
+      </div>
+    </div>`;
+
+  let body = '';
+  if(isManager && ov){
+    const rate = ov.totalCount ? Math.round(ov.doneCount / ov.totalCount * 100) : 0;
+    body += `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;text-align:center"><div style="font-size:12px;color:#9ca3af;">已完成任务卡</div><div style="font-size:22px;font-weight:800;color:#16a34a;margin-top:4px;">${ov.doneCount} / ${ov.totalCount}</div></div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;text-align:center"><div style="font-size:12px;color:#9ca3af;">进行中</div><div style="font-size:22px;font-weight:800;color:#f59e0b;margin-top:4px;">${ov.doingCount}</div></div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;text-align:center"><div style="font-size:12px;color:#9ca3af;">延期</div><div style="font-size:22px;font-weight:800;color:#dc2626;margin-top:4px;">${ov.delayedCount}</div></div>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;text-align:center"><div style="font-size:12px;color:#9ca3af;">完成率</div><div style="font-size:22px;font-weight:800;color:#2563eb;margin-top:4px;">${rate}%</div></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:14px">
+        <button class="btn btn-outline btn-sm" onclick="APP.openSceneStudentsModal()">👥 纳入 / 移除学员</button>
+        <button class="btn btn-outline btn-sm" onclick="APP.openDefenseListModal()">🎤 结业答辩评分</button>
+      </div>
+      <div class="week-section"><div class="week-title">🎯 培训推进区（8周 · 14张任务卡）</div>${sceneWeekGroup(ov.tasks, ov.canEdit)}</div>
+      ${sceneScoreTable(ov)}
+    `;
+  } else if(!isManager){
+    body += `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#64748b">
+      本专项为场景化培训考核：完成下方 <b>4 场固定卷</b> 在线考核（阶段测一 / 二 / 三 + 结业综合卷）。
+      你的推进进度与结业答辩由导师在「推进区」跟踪记录。每卷独立通过线，最高可答 ${MAX_ATTEMPTS} 次。
+    </div>`;
+  }
+
+  body += `<div class="week-section"><div class="week-title">📝 四场固定卷考核</div>${renderExamList(exams)}</div>`;
+
+  if(isManager && !ov){
+    body += `<div style="color:var(--danger);font-size:13px;margin-top:8px">⚠️ 专项数据加载失败，仅展示考试列表。</div>`;
+  }
+
+  const footer = `<div style="text-align:center;margin-top:20px;color:var(--text-sec);font-size:13px">
+    每套固定卷最多 ${MAX_ATTEMPTS} 次尝试机会 · 阶段测一/二/三通过线 70 分 · 结业综合卷通过线 75 分
+  </div>`;
+
+  app.innerHTML = header + `<div class="container">${reminderBanner(false)}${body}${footer}</div>`;
+
+  $$('.exam-item:not(.blocked)').forEach(el => { el.addEventListener('click', () => { startExam(el.dataset.examId); }); });
+  $$('.scene-task-status').forEach(sel => { sel.addEventListener('change', () => { APP.updateSceneTask(sel.dataset.id, sel.value); }); });
+}
+
+function sceneTaskRow(t, canEdit){
+  const statuses = ['未开始', '进行中', '已完成', '延期'];
+  const colorMap = { '未开始':'#9ca3af', '进行中':'#f59e0b', '已完成':'#16a34a', '延期':'#dc2626' };
+  const sel = canEdit
+    ? `<select class="scene-task-status" data-id="${t.id}" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:#fff;">${statuses.map(s => `<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select>`
+    : `<span style="font-size:12px;font-weight:700;color:${colorMap[t.status]||'#9ca3af'}">● ${t.status}</span>`;
+  return `<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #eef2f7;border-radius:8px;margin-bottom:8px;background:#fff">
+    <span style="font-size:20px;flex-shrink:0">🃏</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:14px;font-weight:600;color:#1f2937;">${escapeHtml(t.id)} · ${escapeHtml(t.name)}</div>
+      <div style="font-size:12px;color:#9ca3af;margin-top:2px">📚 ${escapeHtml(t.material)}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:2px">实操：${escapeHtml(t.practice)} · 交付：${escapeHtml(t.deliverable)}</div>
+    </div>
+    <div style="flex-shrink:0">${sel}</div>
+  </div>`;
+}
+function sceneWeekGroup(tasks, canEdit){
+  const weeks = [1,2,3,4,5,6,7,8];
+  let out = '';
+  for(const w of weeks){
+    const wt = tasks.filter(t => t.week === w);
+    if(wt.length === 0) continue;
+    const done = wt.filter(t => t.status === '已完成').length;
+    out += `<div style="padding:10px 12px;background:linear-gradient(90deg,#eff6ff,#f8fafc);border-radius:8px 8px 0 0;border:1px solid #e0e7ff;border-bottom:none;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:14px;font-weight:700;color:#1e40af;">📅 第 ${w} 周 · ${escapeHtml(wt[0].stage)}</span>
+        <span style="font-size:12px;color:#2563eb;">${done}/${wt.length}</span>
+      </div>
+      <div style="padding:8px;border:1px solid #e0e7ff;border-top:none;border-radius:0 0 8px 8px;margin-bottom:12px;">
+        ${wt.map(t => sceneTaskRow(t, canEdit)).join('')}
+      </div>`;
+  }
+  return out;
+}
+function sceneScoreTable(ov){
+  if(!ov.students.length){
+    return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:18px;text-align:center;color:#9ca3af;font-size:13px;margin-bottom:18px">
+      尚未纳入学员。点击「👥 纳入 / 移除学员」把学员纳入本专项，纳入后在下方展示四场成绩与整体通过情况。
+    </div>`;
+  }
+  let rows = '';
+  for(const row of ov.scoreRows){
+    let cells = '';
+    for(const k of ['sceneA','sceneB','sceneC','sceneD']){
+      const e = row.exams[k];
+      if(e){
+        const col = e.passed ? '#16a34a' : (e.score >= 60 ? '#f59e0b' : '#dc2626');
+        cells += `<td style="padding:8px;text-align:center;color:${col};font-weight:600;">${e.score}${e.passed ? ' ✓' : ''}</td>`;
+      } else {
+        cells += `<td style="padding:8px;text-align:center;color:#cbd5e1;">—</td>`;
+      }
+    }
+    rows += `<tr>
+      <td style="padding:8px 12px;text-align:left;font-weight:600;color:#1f2937;white-space:nowrap">${escapeHtml(row.name)}</td>
+      ${cells}
+      <td style="padding:8px;text-align:center;color:#374151;">${row.avg === null ? '—' : row.avg}</td>
+      <td style="padding:8px;text-align:center;">${row.weakest ? `<span style="font-size:12px;color:#b45309;">${row.weakest.title} ${row.weakest.score}/${row.weakest.pass}</span>` : '—'}</td>
+      <td style="padding:8px;text-align:center;">${row.allPassed ? '<span class="badge badge-success">全部通过</span>' : '<span class="badge badge-warning">未完</span>'}</td>
+    </tr>`;
+  }
+  return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:18px;overflow-x:auto">
+    <div style="font-size:14px;font-weight:700;color:#1f2937;margin-bottom:10px;">📊 纳入学员 · 四场成绩（通过线：阶段测 70 / 结业 75）</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:#f8fafc;color:#6b7280;">
+        <th style="padding:8px 12px;text-align:left;">学员</th>
+        <th style="padding:8px;text-align:center;">阶段测一</th>
+        <th style="padding:8px;text-align:center;">阶段测二</th>
+        <th style="padding:8px;text-align:center;">阶段测三</th>
+        <th style="padding:8px;text-align:center;">结业卷</th>
+        <th style="padding:8px;text-align:center;">平均</th>
+        <th style="padding:8px;text-align:center;">最弱科目</th>
+        <th style="padding:8px;text-align:center;">整体</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+async function updateSceneTask(id, status){
+  try{
+    const r = await api('/api/scene/task', { method:'PUT', body: JSON.stringify({ id, status }) });
+    if(r && r.success){ showToast('任务卡状态已更新', 'success'); render(); }
+    else showToast((r && r.error) || '更新失败', 'error');
+  }catch(e){ showToast('网络错误', 'error'); }
+}
+
+async function openSceneStudentsModal(){
+  let candRes, ov;
+  try{ candRes = await api('/api/mentor/students'); } catch(e){ showToast('获取学员列表失败','error'); return; }
+  if(!candRes || !candRes.success){ showToast('获取学员列表失败','error'); return; }
+  ov = sceneCache;
+  const enrolled = new Set((ov ? ov.students : []).map(s => s.username));
+  const list = (candRes.students || []).map(s => {
+    const on = enrolled.has(s.username);
+    return `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid ${on ? '#bbf7d0' : '#e5e7eb'};border-radius:8px;margin-bottom:6px;background:${on ? '#f0fdf4' : '#fff'};cursor:pointer">
+      <input type="checkbox" class="scene-student-cb" data-username="${escapeHtml(s.username)}" ${on ? 'checked' : ''}>
+      <span style="font-size:14px;color:#1f2937;">${escapeHtml(s.name)}</span>
+      <span style="font-size:12px;color:#9ca3af;margin-left:auto">${escapeHtml(s.username)}</span>
+    </label>`;
+  }).join('');
+  sceneModal(sceneOverlayBar('纳入 / 移除学员', '勾选 = 纳入本专项；取消勾选并保存 = 移除。') +
+    `<div style="max-height:52vh;overflow:auto;">${list || '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:20px">暂无可选学员</div>'}</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+      <button data-act="cancel" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:8px;cursor:pointer;font-size:14px;">取消</button>
+      <button data-act="save" style="padding:9px 18px;border:none;background:#2563eb;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;">保存</button>
+    </div>`, async (act, overlay) => {
+      if(act !== 'save') return;
+      const want = new Set();
+      overlay.querySelectorAll('.scene-student-cb').forEach(b => { if(b.checked) want.add(b.dataset.username); });
+      const ops = [];
+      for(const u of want) if(!enrolled.has(u)) ops.push({ action:'add', username:u });
+      for(const u of enrolled) if(!want.has(u)) ops.push({ action:'remove', username:u });
+      if(ops.length === 0){ showToast('无变更','info'); overlay.remove(); return; }
+      for(const op of ops){
+        try{ await api('/api/scene/students', { method:'POST', body: JSON.stringify(op) }); }
+        catch(e){ showToast('操作失败：' + op.username, 'error'); }
+      }
+      overlay.remove();
+      showToast('学员名单已更新','success');
+      render();
+    });
+}
+
+async function loadDefenseMeta(){
+  if(sceneDefenseMeta) return sceneDefenseMeta;
+  try{
+    const res = await api('/api/scene/defense');
+    if(res && res.success){
+      sceneDefenseMeta = { dims: res.dims || [], questions: res.questions || [], vetoes: res.vetoes || [] };
+      return sceneDefenseMeta;
+    }
+  }catch(e){}
+  sceneDefenseMeta = { dims: [], questions: [], vetoes: [] };
+  return sceneDefenseMeta;
+}
+
+async function openDefenseListModal(){
+  let res;
+  try{ res = await api('/api/scene/defense'); }catch(e){ showToast('加载失败','error'); return; }
+  if(!res || !res.success){ showToast('加载失败','error'); return; }
+  sceneDefenseMeta = { dims: res.dims || [], questions: res.questions || [], vetoes: res.vetoes || [] };
+  sceneDefenseRecords = res.records || [];
+  const rows = sceneDefenseRecords.map(r => `
+    <tr>
+      <td style="padding:8px 12px;text-align:left;font-weight:600;color:#1f2937;white-space:nowrap">${escapeHtml(r.studentName)}</td>
+      <td style="padding:8px;text-align:center;color:#374151;font-weight:700;">${r.total}</td>
+      <td style="padding:8px;text-align:center;">${r.passed ? '<span class="badge badge-success">通过</span>' : '<span class="badge badge-danger">不通过</span>'}</td>
+      <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${r.allAnswered ? '三问已答' : '三问未全答'} / ${r.hasVeto ? '触及否决' : '无否决'}</td>
+      <td style="padding:8px;text-align:center;font-size:12px;color:#9ca3af;white-space:nowrap">${(r.createdAt || '').slice(0,10)}</td>
+      <td style="padding:8px;text-align:center;white-space:nowrap">
+        <button data-edit="${r.id}" style="padding:4px 10px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;font-size:12px;background:#fff;color:#374151;">编辑</button>
+        <button data-del="${r.id}" style="padding:4px 10px;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-size:12px;background:#fff;color:#dc2626;">删除</button>
+      </td>
+    </tr>`).join('');
+  sceneModal(sceneOverlayBar('结业答辩评分', '五维各 20 分，总分 ≥ 70 且三问全部答住、未触及否决项才算通过。') +
+    `<button data-act="add" onclick="APP.openSceneDefenseModal()" style="padding:9px 16px;border:none;background:#2563eb;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;margin-bottom:12px;">＋ 新增评分</button>
+    <div style="max-height:52vh;overflow:auto;">
+    ${sceneDefenseRecords.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:#f8fafc;color:#6b7280;">
+        <th style="padding:8px 12px;text-align:left;">学员</th>
+        <th style="padding:8px;text-align:center;">总分</th>
+        <th style="padding:8px;text-align:center;">结论</th>
+        <th style="padding:8px;text-align:center;">必答/否决</th>
+        <th style="padding:8px;text-align:center;">日期</th>
+        <th style="padding:8px;text-align:center;">操作</th>
+      </tr></thead><tbody>${rows}</tbody></table>` : '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:20px">暂无答辩评分记录</div>'}
+    </div>`, (act, overlay, e) => {
+      const eb = e.target.getAttribute && e.target.getAttribute('data-edit');
+      const db = e.target.getAttribute && e.target.getAttribute('data-del');
+      if(eb){ overlay.remove(); APP.openSceneDefenseModal(eb); }
+      if(db){ overlay.remove(); APP.deleteSceneDefense(db); }
+    });
+}
+
+async function openSceneDefenseModal(id){
+  const meta = await loadDefenseMeta();
+  let record = null;
+  if(id !== undefined){
+    try{
+      const res = await api('/api/scene/defense');
+      if(res && res.success) record = (res.records || []).find(r => r.id === id) || null;
+    }catch(e){}
+  }
+  const scores = (record && record.scores) || {};
+  const qStates = (record && record.questions) || [];
+  const vStates = (record && record.vetoes) || [];
+  const studentOptions = ((sceneCache && sceneCache.students) || []).map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}</option>`).join('');
+
+  let html = sceneOverlayBar(id ? '编辑答辩评分' : '新增答辩评分', '五维各 20 分；总分 ≥ 70 且三问全部答住、无否决项则通过。');
+  html += `<div style="margin-bottom:12px;">
+    <span style="font-size:13px;color:#374151;display:block;margin-bottom:4px;">学员</span>
+    <input id="dfStudent" list="dfStudentList" placeholder="输入或选择学员姓名" value="${record ? escapeHtml(record.studentName) : ''}" style="width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;">
+    <datalist id="dfStudentList">${studentOptions}</datalist>
+  </div>`;
+  html += `<div style="font-size:13px;font-weight:700;color:#1f2937;margin:6px 0 8px;">评分维度（各 0-20）</div>`;
+  for(const d of meta.dims){
+    html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <div style="flex:1;min-width:0"><span style="font-size:13px;color:#1f2937;font-weight:600;">${escapeHtml(d.name)}</span>
+        <div style="font-size:11px;color:#9ca3af;">${escapeHtml(d.detail)}</div></div>
+      <input type="number" class="df-dim" data-key="${d.key}" min="0" max="${d.max}" value="${scores[d.key] !== undefined ? scores[d.key] : ''}" placeholder="0-${d.max}" style="width:70px;padding:7px 8px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;text-align:center;">
+    </div>`;
+  }
+  html += `<div style="font-size:13px;font-weight:700;color:#1f2937;margin:12px 0 8px;">三个必答问题（现场问答，答住 = ✓）</div>`;
+  for(const q of meta.questions){
+    const st = qStates.find(s => s.key === q.key);
+    html += `<label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer">
+      <input type="checkbox" class="df-q" data-key="${q.key}" ${st && st.answered ? 'checked' : ''}>
+      <span style="font-size:13px;color:#374151;">${escapeHtml(q.q)}</span></label>`;
+  }
+  html += `<div style="font-size:13px;font-weight:700;color:#1f2937;margin:12px 0 8px;">否决项（命中任一即不通过）</div>`;
+  for(const v of meta.vetoes){
+    const st = vStates.find(s => s.key === v.key);
+    html += `<label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer">
+      <input type="checkbox" class="df-v" data-key="${v.key}" ${st && st.hit ? 'checked' : ''}>
+      <span style="font-size:13px;color:#374151;">${escapeHtml(v.v)}<span style="color:#9ca3af;">（${escapeHtml(v.why)}）</span></span></label>`;
+  }
+  html += `<div style="margin-top:10px;"><span style="font-size:13px;color:#374151;">备注</span>
+    <input id="dfNote" placeholder="选填" value="${record ? escapeHtml(record.note || '') : ''}" style="width:100%;margin-top:4px;padding:9px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;"></div>`;
+  html += `<div style="display:flex;align-items:center;gap:12px;margin-top:16px;">
+    <span style="font-size:14px;color:#374151;">总分：<b id="dfTotal" style="color:#2563eb;font-size:20px;">0</b></span>
+    <span id="dfJudge" style="font-size:13px;font-weight:700;"></span>
+    <span style="flex:1"></span>
+    <button data-act="cancel" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:8px;cursor:pointer;font-size:14px;">取消</button>
+    <button data-act="save" style="padding:9px 18px;border:none;background:#2563eb;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;">保存</button>
+  </div>`;
+
+  const overlay = sceneModal(html, async (act, ovl) => {
+    if(act !== 'save') return;
+    const studentName = ovl.querySelector('#dfStudent').value.trim();
+    const note = ovl.querySelector('#dfNote').value.trim();
+    if(!studentName){ showToast('请填写学员姓名','error'); return; }
+    const payload = {
+      studentName,
+      scores: {},
+      questions: [],
+      vetoes: [],
+      note
+    };
+    ovl.querySelectorAll('.df-dim').forEach(i => payload.scores[i.dataset.key] = Number(i.value) || 0);
+    ovl.querySelectorAll('.df-q').forEach(c => payload.questions.push({ key:c.dataset.key, answered:c.checked }));
+    ovl.querySelectorAll('.df-v').forEach(c => payload.vetoes.push({ key:c.dataset.key, hit:c.checked }));
+    try{
+      let r;
+      if(id) r = await api('/api/scene/defense/' + id, { method:'PUT', body: JSON.stringify(payload) });
+      else r = await api('/api/scene/defense', { method:'POST', body: JSON.stringify(payload) });
+      if(r && r.success){ showToast('评分已保存','success'); ovl.remove(); APP.openDefenseListModal(); }
+      else showToast((r && r.error) || '保存失败','error');
+    }catch(e){ showToast('网络错误','error'); }
+  });
+  recalcSceneDefense(overlay);
+}
+
+function recalcSceneDefense(overlay){
+  const totalEl = overlay ? overlay.querySelector('#dfTotal') : null;
+  if(!totalEl) return;
+  const dims = overlay.querySelectorAll('.df-dim');
+  if(!dims.length) return;
+  const recalc = () => {
+    let t = 0;
+    overlay.querySelectorAll('.df-dim').forEach(x => { t += Number(x.value) || 0; });
+    totalEl.textContent = t;
+    const allQ = [...overlay.querySelectorAll('.df-q')].every(c => c.checked);
+    const anyV = [...overlay.querySelectorAll('.df-v')].some(c => c.checked);
+    const judgeEl = overlay.querySelector('#dfJudge');
+    if(judgeEl){
+      if(t >= 70 && allQ && !anyV){ judgeEl.textContent = '判定：通过'; judgeEl.style.color = '#16a34a'; }
+      else { judgeEl.textContent = '判定：不通过'; judgeEl.style.color = '#dc2626'; }
+    }
+  };
+  dims.forEach(i => i.addEventListener('input', recalc));
+  overlay.querySelectorAll('.df-q').forEach(c => c.addEventListener('change', recalc));
+  overlay.querySelectorAll('.df-v').forEach(c => c.addEventListener('change', recalc));
+  recalc();
+}
+
+async function deleteSceneDefense(id){
+  if(!window.confirm('确认删除这条答辩评分记录？')) return;
+  try{
+    const r = await api('/api/scene/defense/' + id, { method:'DELETE' });
+    if(r && r.success){ showToast('已删除','success'); APP.openDefenseListModal(); }
+    else showToast('删除失败','error');
+  }catch(e){ showToast('网络错误','error'); }
+}
 
 // ===== 初始化 =====
 restoreSession();

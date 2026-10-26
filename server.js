@@ -389,13 +389,20 @@ const EXAM_CONFIGS = {
     { id: 'tr_audio', title: '音频系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/audio.js', totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
     { id: 'tr_ctrl',  title: '中控系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/ctrl.js',  totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
     { id: 'tr_viz',   title: '可视化系统',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/viz.js',   totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+  ],
+  scene: [
+    // 场景化赋能专项 · 固定整卷（不抽题）。fixed=true 时 start-exam 走固定整卷逻辑。
+    { id: 'sceneA', title: '阶段测一 · 拆场景', panel: 'scene', stage: 1, duration: 40, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneA', passScore: 70, totalQuestions: 12, distribution: { single: 5, multiple: 3, judge: 2, short: 2 } },
+    { id: 'sceneB', title: '阶段测二 · 出方案', panel: 'scene', stage: 2, duration: 50, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneB', passScore: 70, totalQuestions: 11, distribution: { single: 4, multiple: 2, judge: 2, short: 3 } },
+    { id: 'sceneC', title: '阶段测三 · 讲方案', panel: 'scene', stage: 3, duration: 40, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneC', passScore: 70, totalQuestions: 10, distribution: { single: 3, multiple: 2, judge: 1, short: 4 } },
+    { id: 'sceneD', title: '结业综合卷', panel: 'scene', stage: 4, duration: 120, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneD', passScore: 75, totalQuestions: 21, distribution: { single: 12, multiple: 4, judge: 4, short: 1 } },
   ]
 };
 
 // ===== Fisher-Yates 洗牌 =====
 async function getAllExams() {
   const all = [];
-  for (const panel of ['newbie', 'tech', 'sales', 'client', 'training']) {
+  for (const panel of ['newbie', 'tech', 'sales', 'client', 'training', 'scene']) {
     for (const exam of (EXAM_CONFIGS[panel] || [])) all.push({ ...exam });
   }
   const config = await getModuleConfig();
@@ -427,7 +434,7 @@ async function getAllExams() {
 }
 
 async function getAllPanels() {
-  const panels = ['newbie', 'tech', 'sales', 'client', 'training'];
+  const panels = ['newbie', 'tech', 'sales', 'client', 'training', 'scene'];
   const config = await getModuleConfig();
   const meta = await db.readObj('new_product_meta.json');
   for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
@@ -558,7 +565,7 @@ function gradeShortAnswer(answer, keywords, maxPoints) {
 }
 
 // ===== 面板中文名 =====
-const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销售进阶', client: '客户端考核', new_product: '新品考核' };
+const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销售进阶', client: '客户端考核', new_product: '新品考核', scene: '场景化赋能专项' };
 
 // ====== API 路由 ======
 
@@ -872,8 +879,10 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   }
 
   // 按学生分组，每场考试(panel+examId)取最高分
+  // 场景化专项（panel=scene）不进全局排行榜与积分，保持两套独立
   const studentMap = {};
   for (const r of records) {
+    if (r.panel === 'scene') continue;
     const name = r.studentName;
     if (!studentMap[name]) studentMap[name] = { records: [], exams: {} };
     studentMap[name].records.push(r);
@@ -1015,7 +1024,19 @@ app.post('/api/start-exam', async (req, res) => {
   if (bank.length === 0) return res.status(500).json({ error: '题库加载失败，请联系管理员' });
   
   let questions;
-  if (exam.distribution) {
+  // ===== 场景化专项 · 固定整卷：不抽题不放回，按 examIdFilter 精确取全部题，保持题目顺序 =====
+  if (exam && exam.fixed && exam.examIdFilter) {
+    const picked = bank
+      .filter(q => q.examId === exam.examIdFilter)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), 'zh'));
+    // 按题目自带分值定分（固定整卷每卷合计 100 分），不随机权重缩放，保证通过线可信
+    for (const q of picked) q.points = (q.points !== undefined && q.points !== null) ? q.points : 5;
+    if (picked.length < exam.totalQuestions) {
+      console.error('[fixed] 固定整卷题数不足:', exam.examIdFilter, picked.length, '/', exam.totalQuestions);
+      return res.status(500).json({ error: '该固定卷题库配置不完整，请联系管理员' });
+    }
+    questions = picked;
+  } else if (exam.distribution) {
     questions = pickQuestions(bank, exam, exam.panel === 'newbie' ? exam.id : null);
   } else {
     questions = shuffle(bank).slice(0, exam.totalQuestions);
@@ -1068,6 +1089,13 @@ app.post('/api/records', async (req, res) => {
       const points = q.points || 5;
       const userAnswer = (record.answers || {})[q.id];
       let score = 0;
+      // 主观题（简答/配推/情景/大案例，manual=true）不自动评分，由导师人工评分；此处仅登记答题内容
+      if (q.manual) {
+        typeScores[qType] = typeScores[qType] || { score: 0, max: 0 };
+        typeScores[qType].max += points;
+        questionScores[q.id] = { score: 0, maxScore: points, manual: true };
+        continue;
+      }
       if (qType === 'single' || qType === 'judge') {
         score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
       } else if (qType === 'multiple') {
@@ -1086,10 +1114,15 @@ app.post('/api/records', async (req, res) => {
     record.submitTime = record.submitTime || new Date().toISOString();
     record.autoScore = autoScore;
     record.finalScore = autoScore;
-    record.passed = autoScore >= PASSING_SCORE;
+    // 固定整卷按该卷通过线判定；其余沿用全局通过线
+    const examCfg = (await getAllExams()).find(e => e.id === record.examId);
+    const passLine = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
+    record.passScore = passLine;
+    record.passed = autoScore >= passLine;
     record.questionScores = questionScores;
     record.typeScores = typeScores;
     record.mentorScored = false;
+    record.mentorPending = (record.panel === 'scene');
     
     records.push(record);
     await db.writeRaw('records.json', records);
@@ -1286,7 +1319,14 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
     if (idx < 0) return;
     records[idx].mentorScore = null;
     records[idx].finalScore = records[idx].autoScore;
-    records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
+    // 撤销评分后：场景化固定卷按该卷通过线重判，其余沿用全局通过线
+    if (records[idx].panel === 'scene') {
+      const examCfg = (await getAllExams()).find(e => e.id === records[idx].examId);
+      records[idx].passScore = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
+      records[idx].passed = records[idx].autoScore >= records[idx].passScore;
+    } else {
+      records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
+    }
     records[idx].mentorScored = false;
     records[idx].mentorScoreDetails = null;
     await db.writeRaw('records.json', records);
@@ -1316,6 +1356,241 @@ app.delete('/api/mentor/records', mentorAuth, async (req, res) => {
     await db.writeRaw('records.json', []);
   });
   res.json({ success: true, deletedCount: count });
+});
+
+// ================= 场景化赋能专项 =================
+// 独立于全局排行榜/积分体系；推进区 + 固定整卷 + 结业答辩评分
+// 数据文件：scene_progress.json（任务卡状态+纳入学员+执行计划元信息）、scene_defense.json（答辩评分记录）
+const SCENE_TASKS = [
+  // 结构：{ id, week, stage, name, material, practice, deliverable, status }
+  { id: 'T1',  week: 1, stage: '一 拆场景', name: '拆解会议室已成交项目', material: '本方案 2.2 子系统角色表；智能会议室解决方案 2025V1.5', practice: '拿一个已成交会议室项目，凭配置清单反推每个系统为什么配', deliverable: '反推记录 8 至 10 条' },
+  { id: 'T2',  week: 1, stage: '一 拆场景', name: '拆解展厅已成交项目', material: '本方案 2.2；数字化智慧展厅解决方案 1.3', practice: '同法拆一个已成交展厅项目，指出至少一处本可以不配的系统', deliverable: '反推记录' },
+  { id: 'T3',  week: 2, stage: '一 拆场景', name: '跟访现场勘察', material: '本方案附录 A 速查卡；勘察记录九问', practice: '跟访一次现场勘察，只做记录不做判断', deliverable: '勘察记录（九问填满）' },
+  { id: 'T4',  week: 2, stage: '一 拆场景', name: '四层拓扑归位', material: '本方案 2.3 四层拓扑', practice: '把 T1 与 T2 的设备按四层拓扑重新归位，画两张草图', deliverable: '两张拓扑草图' },
+  { id: 'T5',  week: 3, stage: '二 出方案', name: '会议室需求转配置', material: '本方案 4.2 推演链；4.3 交付物标准', practice: '会议室需求转配置，七步逐条写判断，含决定不配的结论', deliverable: '配置草表' },
+  { id: 'T6',  week: 4, stage: '二 出方案', name: '会议室方案成稿', material: '本方案 4.3；音频扩声系统项目方案设计 V1.0', practice: '会议室成稿：拓扑图与配置表互相校验', deliverable: '方案包 A' },
+  { id: 'T7',  week: 5, stage: '二 出方案', name: '展厅需求转配置', material: '展厅音频方案设计专项培训；本方案 2.2 展厅列', practice: '展厅需求转配置，先定馆型与参观动线，音频按讲解方式分档', deliverable: '配置草表' },
+  { id: 'T8',  week: 6, stage: '二 出方案', name: '展厅方案成稿', material: '本方案 4.3；数字化智慧展厅解决方案 1.3', practice: '展厅成稿，多屏同步与信号调度须单独说明', deliverable: '方案包 B' },
+  { id: 'T9',  week: 6, stage: '二 出方案', name: '方案交叉评审', material: '本方案 4.3 验收要点', practice: '两套方案交叉评审，互挑漏项，每人至少挑出对方 3 处', deliverable: '评审单' },
+  { id: 'T10', week: 6, stage: '二 出方案', name: '方案修订终版', material: '本方案 4.3', practice: '按评审意见修订，出终版', deliverable: '方案包 A、B 终版' },
+  { id: 'T11', week: 7, stage: '三 讲方案', name: '写 10 页讲解稿', material: '本方案 4.4 讲解稿固定骨架', practice: '按 10 页骨架写讲解稿', deliverable: '讲解稿' },
+  { id: 'T12', week: 7, stage: '三 讲方案', name: '内测试讲', material: '本方案 4.4；4.1 三条组织规则', practice: '内测试讲一次并录音回听，超时即重写', deliverable: '试讲记录' },
+  { id: 'T13', week: 8, stage: '三 讲方案', name: '准备三个必答问题', material: '本方案 5.1 三个必答问题', practice: '准备三个必答问题的答案，每题不超过三句话', deliverable: '应答卡' },
+  { id: 'T14', week: 8, stage: '三 讲方案', name: '终期答辩', material: '本方案 5.1 评分表', practice: '终期答辩，五维各 20 分', deliverable: '答辩记录' }
+];
+// 结业答辩评分维度（五维各 20 分，70 分通过；三必答 + 五否决项）
+const SCENE_DEFENSE_DIMS = [
+  { key: 'req',   name: '需求理解', detail: '是否抓住真实痛点，而非罗列功能；能否复述客户原话', max: 20 },
+  { key: 'config', name: '系统配置', detail: '有无漏项，有无多余项；配置是否能被推演链解释', max: 20 },
+  { key: 'figure', name: '图与表', detail: '拓扑与清单是否一致，四层是否清楚', max: 20 },
+  { key: 'speech', name: '讲解表达', detail: '15 分钟内是否讲完，结构是否清楚', max: 20 },
+  { key: 'reply',  name: '异议应答', detail: '三个必答问题是否答得住', max: 20 }
+];
+const SCENE_DEFENSE_QUESTIONS = [
+  { key: 'Q1', q: '你这个方案里最贵的一项是哪个，为什么值这个钱？' },
+  { key: 'Q2', q: '如果预算砍掉 30%，你先砍哪个，为什么？' },
+  { key: 'Q3', q: '客户拿竞品来比，你怎么说？' }
+];
+const SCENE_DEFENSE_VETOES = [
+  { key: 'V1', v: '漏项超过 5%', why: '报价失真，后期扯皮' },
+  { key: 'V2', v: '带载或功率算错', why: '现场点不亮、带不动，直接事故' },
+  { key: 'V3', v: '承诺产品不具备的功能', why: '交付即违约' },
+  { key: 'V4', v: '违反强制标准', why: '验收过不了' },
+  { key: 'V5', v: '竞品对标不实', why: '丢单且伤品牌' }
+];
+
+// 读取/初始化推进区数据
+async function getSceneProgress() {
+  let p = await db.readObj('scene_progress.json');
+  if (!p || typeof p !== 'object') p = {};
+  if (!p.taskStatus) p.taskStatus = {};
+  if (!p.students) p.students = []; // 纳入本专项的学员用户名
+  return p;
+}
+
+app.get('/api/scene/overview', mentorAuth, async (req, res) => {
+  try {
+    const cfg = (await getModuleConfig());
+    const users = await db.readObj('users.json');
+    const records = await db.readJSON('records.json');
+    const progress = await getSceneProgress();
+
+    // 任务卡列表（合并状态）
+    const tasks = SCENE_TASKS.map(t => ({
+      ...t,
+      status: progress.taskStatus[t.id] || '未开始'
+    }));
+    const doneCount = tasks.filter(t => t.status === '已完成').length;
+    const doingCount = tasks.filter(t => t.status === '进行中').length;
+    const delayedCount = tasks.filter(t => t.status === '延期').length;
+
+    // 纳入学员名单（解析姓名）
+    const students = progress.students.map(u => {
+      const uu = users[u];
+      return { username: u, name: uu ? uu.name : u };
+    });
+
+    // 按纳入学员聚合四场成绩（取每人每场最高 finalScore）
+    const recordKeys = ['sceneA', 'sceneB', 'sceneC', 'sceneD'];
+    const scoreMap = {}; // username -> { sceneA:{score,passed,count}, ... }
+    for (const u of progress.students) {
+      const uname = (users[u] && users[u].name) || u;
+      scoreMap[u] = { uname, exams: {} };
+    }
+    for (const r of records) {
+      if ((r.panel || '') !== 'scene') continue;
+      if (!recordKeys.includes(r.examId)) continue;
+      const uname = r.studentName;
+      // 通过学员名字匹配到纳入用户（可能存在同名，按姓名匹配取一个）
+      const matchedUser = progress.students.find(u => (users[u] && users[u].name) === uname);
+      if (!matchedUser) continue;
+      const holder = scoreMap[matchedUser];
+      const score = r.finalScore !== undefined ? r.finalScore : (r.autoScore !== undefined ? r.autoScore : 0);
+      if (!holder.exams[r.examId] || score > holder.exams[r.examId].score) {
+        holder.exams[r.examId] = { score, passed: !!r.passed, count: (holder.exams[r.examId] ? holder.exams[r.examId].count : 0) + 1, id: r.id };
+      } else if (holder.exams[r.examId]) {
+        holder.exams[r.examId].count += 1;
+      }
+    }
+
+    // 成绩汇总
+    const examPasses = { sceneA: 70, sceneB: 70, sceneC: 70, sceneD: 75 };
+    const scoreRows = progress.students.map(u => {
+      const holder = scoreMap[u];
+      const exams = {};
+      let valid = 0, sum = 0;
+      for (const k of recordKeys) {
+        const e = holder.exams[k];
+        exams[k] = e ? { score: e.score, passed: e.passed, count: e.count, id: e.id } : null;
+        if (e) { valid++; sum += e.score; }
+      }
+      const avg = valid > 0 ? Math.round((sum / valid) * 10) / 10 : null;
+      // 最弱科目
+      let weakest = null;
+      for (const k of recordKeys) {
+        if (!exams[k]) continue;
+        if (!weakest || exams[k].score < weakest.score) weakest = { key: k, score: exams[k].score, pass: examPasses[k], title: k };
+      }
+      const allPassed = recordKeys.every(k => exams[k] && exams[k].passed);
+      return { username: u, name: holder.uname, exams, avg, weakest: weakest ? { ...weakest, title: { sceneA: '阶段测一', sceneB: '阶段测二', sceneC: '阶段测三', sceneD: '结业卷' }[weakest.key] || weakest.key } : null, allPassed };
+    });
+
+    res.json({
+      success: true,
+      meta: { name: '场景化赋能专项', passLines: examPasses },
+      tasks, doneCount, doingCount, delayedCount, totalCount: tasks.length,
+      students, scoreRows,
+      defenseDims: SCENE_DEFENSE_DIMS,
+      defenseQuestions: SCENE_DEFENSE_QUESTIONS,
+      defenseVetoes: SCENE_DEFENSE_VETOES,
+      canEdit: req.currentUser.role === 'admin' || req.currentUser.role === 'mentor'
+    });
+  } catch (e) {
+    console.error('[scene/overview] error:', e.message);
+    res.status(500).json({ error: '获取专项数据失败：' + e.message });
+  }
+});
+
+// 更新任务卡状态（导师/超管）
+app.put('/api/scene/task', mentorAuth, async (req, res) => {
+  const { id, status } = req.body;
+  const validStatuses = ['未开始', '进行中', '已完成', '延期'];
+  if (!validStatuses.includes(status)) return res.status(400).json({ error: '非法状态' });
+  const validId = SCENE_TASKS.some(t => t.id === id);
+  if (!validId) return res.status(400).json({ error: '任务卡不存在' });
+  await db.withLock('scene_progress.json', async () => {
+    const p = await getSceneProgress();
+    p.taskStatus[id] = status;
+    await db.writeRaw('scene_progress.json', p);
+  });
+  res.json({ success: true });
+});
+
+// 纳入 / 移除学员（导师/超管）。body: { action:'add'|'remove', username }
+app.post('/api/scene/students', mentorAuth, async (req, res) => {
+  const { action, username } = req.body;
+  if (!username || !['add', 'remove'].includes(action)) return res.status(400).json({ error: '参数不完整' });
+  const users = await db.readObj('users.json');
+  const u = users[username];
+  if (!u) return res.status(400).json({ error: '用户不存在' });
+  await db.withLock('scene_progress.json', async () => {
+    const p = await getSceneProgress();
+    if (action === 'add') {
+      if (!p.students.includes(username)) p.students.push(username);
+    } else {
+      p.students = p.students.filter(s => s !== username);
+    }
+    await db.writeRaw('scene_progress.json', p);
+  });
+  res.json({ success: true });
+});
+
+// ===== 结业答辩评分 =====
+
+app.get('/api/scene/defense', mentorAuth, async (req, res) => {
+  const defense = await db.readObj('scene_defense.json');
+  const users = await db.readObj('users.json');
+  const list = Object.entries(defense).map(([id, d]) => {
+    const uname = (users[d.username] && users[d.username].name) || d.username;
+    return { id, username: d.username, studentName: uname, ...d };
+  }).filter(d => d.studentName);
+  res.json({ success: true, records: list, dims: SCENE_DEFENSE_DIMS, questions: SCENE_DEFENSE_QUESTIONS, vetoes: SCENE_DEFENSE_VETOES });
+});
+
+app.post('/api/scene/defense', mentorAuth, async (req, res) => {
+  const { username, studentName, scores, questions, vetoes, note } = req.body;
+  if (!studentName) return res.status(400).json({ error: '请选择学员' });
+  const users = await db.readObj('users.json');
+  // 解析最终判定
+  const dims = SCENE_DEFENSE_DIMS;
+  const total = dims.reduce((s, d) => s + Number(scores && scores[d.key] || 0), 0);
+  const allAnswered = (questions && questions.every(q => q.answered === true)) || false;
+  const hasVeto = (vetoes && vetoes.some(v => v.hit === true)) || false;
+  const passed = dims.every(d => (Number(scores && scores[d.key]) || 0) <= d.max) && total >= 70 && allAnswered && !hasVeto;
+  const id = 'df_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  const rec = { id, username: username || studentName, studentName, scores: scores || {}, questions: questions || [], vetoes: vetoes || [], total, allAnswered, hasVeto, passed, note: note || '', createdAt: new Date().toISOString() };
+  await db.withLock('scene_defense.json', async () => {
+    const defense = await db.readObj('scene_defense.json');
+    defense[id] = rec;
+    await db.writeRaw('scene_defense.json', defense);
+  });
+  res.json({ success: true, record: rec });
+});
+
+app.put('/api/scene/defense/:id', mentorAuth, async (req, res) => {
+  const { scores, questions, vetoes, note, studentName } = req.body;
+  let rec = null;
+  await db.withLock('scene_defense.json', async () => {
+    const defense = await db.readObj('scene_defense.json');
+    const r = defense[req.params.id];
+    if (!r) return;
+    if (studentName !== undefined) r.studentName = studentName;
+    if (scores) r.scores = scores;
+    if (questions) r.questions = questions;
+    if (vetoes) r.vetoes = vetoes;
+    if (note !== undefined) r.note = note;
+    const dims = SCENE_DEFENSE_DIMS;
+    const total = dims.reduce((s, d) => s + Number(r.scores && r.scores[d.key] || 0), 0);
+    r.total = total;
+    r.allAnswered = (r.questions && r.questions.every(q => q.answered === true)) || false;
+    r.hasVeto = (r.vetoes && r.vetoes.some(v => v.hit === true)) || false;
+    r.passed = dims.every(d => (Number(r.scores && r.scores[d.key]) || 0) <= d.max) && total >= 70 && r.allAnswered && !r.hasVeto;
+    defense[req.params.id] = r;
+    await db.writeRaw('scene_defense.json', defense);
+    rec = r;
+  });
+  if (!rec) return res.status(404).json({ error: '记录不存在' });
+  res.json({ success: true, record: rec });
+});
+
+app.delete('/api/scene/defense/:id', mentorAuth, async (req, res) => {
+  let deleted = null;
+  await db.withLock('scene_defense.json', async () => {
+    const defense = await db.readObj('scene_defense.json');
+    if (defense[req.params.id]) { deleted = defense[req.params.id]; delete defense[req.params.id]; await db.writeRaw('scene_defense.json', defense); }
+  });
+  if (!deleted) return res.status(404).json({ error: '记录不存在' });
+  res.json({ success: true, deleted });
 });
 
 // ===== 题库管理 =====
@@ -1360,7 +1635,7 @@ app.get('/api/mentor/questions', mentorAuth, async (req, res) => {
 // 板块中文名（导出专用，含 training；未收录的模块从 module_config 取 name）
 const EXPORT_PANEL_LABELS = {
   newbie: '新人专项', training: '新人培训专项（祥雨/伟桀）', tech: '技术进阶',
-  sales: '销售进阶', client: '客户端考核', new_product: '新品考核'
+  sales: '销售进阶', client: '客户端考核', new_product: '新品考核', scene: '场景化赋能专项'
 };
 async function exportPanelLabel(panelId) {
   if (EXPORT_PANEL_LABELS[panelId]) return EXPORT_PANEL_LABELS[panelId];
