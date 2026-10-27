@@ -426,58 +426,58 @@ function writeQuestionFile(exam, content) {
 // ===== 考试配置 =====
 const EXAM_CONFIGS = {
   newbie: [
-    { id: 'w1d1', title: 'W1-D1 诺瓦公司+LED行业+基础知识', panel: 'newbie', week: 1, day: 1, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w1d2', title: 'W1-D2 信号源+控制系统+接收卡/发送卡', panel: 'newbie', week: 1, day: 2, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w1d3', title: 'W1-D3 LED方案+V系列+H系列', panel: 'newbie', week: 1, day: 3, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w1d4', title: 'W1-D4 TB系列+TU系列+一体机+配件+GTS', panel: 'newbie', week: 1, day: 4, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w1week', title: 'W1-Week 诺瓦知识串讲+周考', panel: 'newbie', week: 1, day: 5, brand: '诺瓦', duration: 60, questionFile: 'newbie/week1.js', totalQuestions: 25, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w2d1', title: 'W2-D1 嗨动公司+LCD行业+拼接方案', panel: 'newbie', week: 2, day: 1, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w2d2', title: 'W2-D2 E系列+B系列+EMX+矩阵+DT分配器', panel: 'newbie', week: 2, day: 2, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w2d3', title: 'W2-D3 NVDS解码+传输配件+音频基础', panel: 'newbie', week: 2, day: 3, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w2d4', title: 'W2-D4 天韵+奥菲斯+音频处理器+选型', panel: 'newbie', week: 2, day: 4, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w2week', title: 'W2-Week 嗨动知识串讲+周考', panel: 'newbie', week: 2, day: 5, brand: '嗨动', duration: 60, questionFile: 'newbie/week2.js', totalQuestions: 25, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w3d1', title: 'W3-D1 公共广播+分布式+易诚+西格玛', panel: 'newbie', week: 3, day: 1, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w3d2', title: 'W3-D2 多媒体播控+新媒体+ECS3000+灵石', panel: 'newbie', week: 3, day: 2, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w3d3', title: 'W3-D3 嗨动总览+拼控+播控+AI+无纸化', panel: 'newbie', week: 3, day: 3, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w3d4', title: 'W3-D4 展厅参观+智能中控+视频会议', panel: 'newbie', week: 3, day: 4, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 20, replaceCount: 5, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
-    { id: 'w3week', title: 'W3-Week 综合结业考核', panel: 'newbie', week: 3, day: 5, brand: '嗨动', duration: 90, questionFile: 'newbie/week3.js', totalQuestions: 30, replaceCount: 8, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w1d1', title: 'W1-D1 诺瓦公司+LED行业+基础知识', panel: 'newbie', week: 1, day: 1, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w1d2', title: 'W1-D2 信号源+控制系统+视频处理+接收卡/发送卡', panel: 'newbie', week: 1, day: 2, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w1d3', title: 'W1-D3 LED方案+V系列+H系列', panel: 'newbie', week: 1, day: 3, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w1d4', title: 'W1-D4 TB系列+TU系列+一体机+配件+GTS', panel: 'newbie', week: 1, day: 4, brand: '诺瓦', duration: 30, questionFile: 'newbie/week1.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w1week', title: 'W1-Week 诺瓦知识串讲+周考', panel: 'newbie', week: 1, day: 5, brand: '诺瓦', duration: 60, questionFile: 'newbie/week1.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w2d1', title: 'W2-D1 嗨动公司+LCD行业+拼接方案', panel: 'newbie', week: 2, day: 1, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w2d2', title: 'W2-D2 E系列+B系列+EMX+矩阵+DT分配器', panel: 'newbie', week: 2, day: 2, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w2d3', title: 'W2-D3 NVDS解码+传输配件+音频基础', panel: 'newbie', week: 2, day: 3, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w2d4', title: 'W2-D4 天韵+奥菲斯+音频处理器+选型', panel: 'newbie', week: 2, day: 4, brand: '嗨动', duration: 30, questionFile: 'newbie/week2.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w2week', title: 'W2-Week 嗨动知识串讲+周考', panel: 'newbie', week: 2, day: 5, brand: '嗨动', duration: 60, questionFile: 'newbie/week2.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w3d1', title: 'W3-D1 公共广播+分布式+易诚+西格玛', panel: 'newbie', week: 3, day: 1, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w3d2', title: 'W3-D2 多媒体播控+新媒体+ECS3000+灵石', panel: 'newbie', week: 3, day: 2, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w3d3', title: 'W3-D3 嗨动总览+阿尔法/阿丽塔拼控+缪斯播控', panel: 'newbie', week: 3, day: 3, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w3d4', title: 'W3-D4 泰山坐席+科赛无纸化+展厅+艾欧塔中控+灵曜会议', panel: 'newbie', week: 3, day: 4, brand: '嗨动', duration: 30, questionFile: 'newbie/week3.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
+    { id: 'w3week', title: 'W3-Week 综合结业考核', panel: 'newbie', week: 3, day: 5, brand: '嗨动', duration: 90, questionFile: 'newbie/week3.js', totalQuestions: 18, distribution: { single: 8, multiple: 4, judge: 4, short: 2 } },
   ],
   tech: [
-    { id: 'tech_nova_led', title: '诺瓦 LED控制系统', panel: 'tech', brand: '诺瓦', duration: 50, questionFile: 'tech/nova_led.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_nova_video', title: '诺瓦 视频拼接处理器', panel: 'tech', brand: '诺瓦', duration: 50, questionFile: 'tech/nova_video.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_nova_integration', title: '诺瓦 整机方案与配件', panel: 'tech', brand: '诺瓦', duration: 50, questionFile: 'tech/nova_integration.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_hd_video', title: '嗨动 视频拼接与矩阵', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_video.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_hd_distributed', title: '嗨动 分布式与中控', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_distributed.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_hd_audio', title: '嗨动 音频扩声系统', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_audio.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_multimedia.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
-    { id: 'tech_comprehensive', title: '全系列产品综合考核', panel: 'tech', brand: '综合', duration: 70, questionFile: 'tech/comprehensive.js', totalQuestions: 25, replaceCount: 8, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
+    { id: 'tech_nova_led', title: '诺瓦 LED控制系统', panel: 'tech', brand: '诺瓦', duration: 50, questionFile: 'tech/nova_led.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_nova_video', title: '诺瓦 视频拼接处理器', panel: 'tech', brand: '诺瓦', duration: 50, questionFile: 'tech/nova_video.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_nova_integration', title: '诺瓦 整机方案与配件', panel: 'tech', brand: '诺瓦', duration: 50, questionFile: 'tech/nova_integration.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_hd_video', title: '嗨动 视频拼接与矩阵', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_video.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_hd_distributed', title: '嗨动 分布式与中控', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_distributed.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_hd_audio', title: '嗨动 音频扩声系统', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_audio.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'tech', brand: '嗨动', duration: 50, questionFile: 'tech/hd_multimedia.js', totalQuestions: 20, distribution: { single: 8, multiple: 5, judge: 4, short: 3 } },
+    { id: 'tech_comprehensive', title: '全系列产品综合考核', panel: 'tech', brand: '综合', duration: 70, questionFile: 'tech/comprehensive.js', totalQuestions: 25, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
   ],
   sales: [
-    { id: 'sales_nova_led', title: '诺瓦 LED控制系统', panel: 'sales', brand: '诺瓦', duration: 45, questionFile: 'sales/nova_led.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_nova_video', title: '诺瓦 视频拼接处理器', panel: 'sales', brand: '诺瓦', duration: 45, questionFile: 'sales/nova_video.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_nova_integration', title: '诺瓦 整机方案与配件', panel: 'sales', brand: '诺瓦', duration: 45, questionFile: 'sales/nova_integration.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_hd_video', title: '嗨动 视频拼接与矩阵', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_video.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_hd_distributed', title: '嗨动 分布式与中控', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_distributed.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_hd_audio', title: '嗨动 音频扩声系统', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_audio.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_multimedia.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'sales_comprehensive', title: '全系列产品综合考核', panel: 'sales', brand: '综合', duration: 65, questionFile: 'sales/comprehensive.js', totalQuestions: 25, replaceCount: 8, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
+    { id: 'sales_nova_led', title: '诺瓦 LED控制系统', panel: 'sales', brand: '诺瓦', duration: 45, questionFile: 'sales/nova_led.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_nova_video', title: '诺瓦 视频拼接处理器', panel: 'sales', brand: '诺瓦', duration: 45, questionFile: 'sales/nova_video.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_nova_integration', title: '诺瓦 整机方案与配件', panel: 'sales', brand: '诺瓦', duration: 45, questionFile: 'sales/nova_integration.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_hd_video', title: '嗨动 视频拼接与矩阵', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_video.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_hd_distributed', title: '嗨动 分布式与中控', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_distributed.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_hd_audio', title: '嗨动 音频扩声系统', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_audio.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'sales', brand: '嗨动', duration: 45, questionFile: 'sales/hd_multimedia.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'sales_comprehensive', title: '全系列产品综合考核', panel: 'sales', brand: '综合', duration: 65, questionFile: 'sales/comprehensive.js', totalQuestions: 25, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
   ],
   client: [
-    { id: 'client_nova_led', title: '诺瓦 LED控制系统', panel: 'client', brand: '诺瓦', duration: 40, questionFile: 'client/nova_led.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_nova_video', title: '诺瓦 视频拼接处理器', panel: 'client', brand: '诺瓦', duration: 40, questionFile: 'client/nova_video.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_nova_integration', title: '诺瓦 整机方案与配件', panel: 'client', brand: '诺瓦', duration: 40, questionFile: 'client/nova_integration.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_hd_video', title: '嗨动 视频拼接与矩阵', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_video.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_hd_distributed', title: '嗨动 分布式与中控', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_distributed.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_hd_audio', title: '嗨动 音频扩声系统', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_audio.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_multimedia.js', totalQuestions: 20, replaceCount: 6, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
-    { id: 'client_comprehensive', title: '全系列产品综合考核', panel: 'client', brand: '综合', duration: 60, questionFile: 'client/comprehensive.js', totalQuestions: 25, replaceCount: 8, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
+    { id: 'client_nova_led', title: '诺瓦 LED控制系统', panel: 'client', brand: '诺瓦', duration: 40, questionFile: 'client/nova_led.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_nova_video', title: '诺瓦 视频拼接处理器', panel: 'client', brand: '诺瓦', duration: 40, questionFile: 'client/nova_video.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_nova_integration', title: '诺瓦 整机方案与配件', panel: 'client', brand: '诺瓦', duration: 40, questionFile: 'client/nova_integration.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_hd_video', title: '嗨动 视频拼接与矩阵', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_video.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_hd_distributed', title: '嗨动 分布式与中控', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_distributed.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_hd_audio', title: '嗨动 音频扩声系统', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_audio.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_hd_multimedia', title: '嗨动 多媒体与会议', panel: 'client', brand: '嗨动', duration: 40, questionFile: 'client/hd_multimedia.js', totalQuestions: 20, distribution: { single: 10, multiple: 5, judge: 4, short: 1 } },
+    { id: 'client_comprehensive', title: '全系列产品综合考核', panel: 'client', brand: '综合', duration: 60, questionFile: 'client/comprehensive.js', totalQuestions: 25, distribution: { single: 12, multiple: 5, judge: 5, short: 3 } },
   ],
   training: [
-    { id: 'tr_lcd',   title: 'LCD液晶拼接', panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/lcd.js',   totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
-    { id: 'tr_media', title: '媒体服务器',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/media.js', totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
-    { id: 'tr_audio', title: '音频系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/audio.js', totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
-    { id: 'tr_ctrl',  title: '中控系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/ctrl.js',  totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
-    { id: 'tr_viz',   title: '可视化系统',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/viz.js',   totalQuestions: 18, replaceCount: 3, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_lcd',   title: 'LCD液晶拼接', panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/lcd.js',   totalQuestions: 18, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_media', title: '媒体服务器',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/media.js', totalQuestions: 18, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_audio', title: '音频系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/audio.js', totalQuestions: 18, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_ctrl',  title: '中控系统',     panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/ctrl.js',  totalQuestions: 18, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
+    { id: 'tr_viz',   title: '可视化系统',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/viz.js',   totalQuestions: 18, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
   ],
   scene: [
     // 场景化赋能专项 · 固定整卷（不抽题）。fixed=true 时 start-exam 走固定整卷逻辑。
@@ -503,7 +503,7 @@ async function getAllExams() {
       const m = meta[bankId];
       if (m) all.push({
         id: m.id, title: m.title, panel: moduleId, brand: m.brand || '新品',
-        duration: 40, questionFile: m.questionFile, totalQuestions: 18, replaceCount: 5,
+        duration: 40, questionFile: m.questionFile, totalQuestions: 18,
         distribution: m.distribution || { single: 8, multiple: 5, judge: 4, short: 1 }
       });
     }
@@ -514,7 +514,7 @@ async function getAllExams() {
       const m = meta[bankId];
       if (m) all.push({
         id: m.id, title: m.title, panel: moduleId, brand: m.brand || '新品',
-        duration: 40, questionFile: m.questionFile, totalQuestions: 18, replaceCount: 5,
+        duration: 40, questionFile: m.questionFile, totalQuestions: 18,
         distribution: m.distribution || { single: 8, multiple: 5, judge: 4, short: 1 }
       });
     }
@@ -546,82 +546,56 @@ function shuffle(arr) {
   return a;
 }
 
+// ===== 抽题（课目隔离 —— 原则性规则）=====
+// 一次考试只能出现「本场考试自己」的题目：
+//   · 题库文件带 examId 标签（新人专项：一个文件 = 一周 5 场考试）
+//     → 抽题、备选轮换、补足题量，全部限制在本场 examId 的题池内，绝不跨课目捞题。
+//   · 题库文件不带 examId（技术/销售/客户端/新品：一个文件即一场考试）
+//     → 整份文件就是本场题池。
+// 随机只做两件事：打乱本场考题顺序 + 题池大于题量时轮换备选题。
 function pickQuestions(bank, config, examId) {
-  const dist = config.distribution;
-  const totalNeed = config.totalQuestions || Object.values(dist).reduce((a,b)=>a+b, 0);
-  const replaceCount = config.replaceCount || 0;
+  const dist = config.distribution || {};
+  const needSum = TYPE_ORDER.reduce((a, t) => a + (dist[t] || 0), 0);
+  // 题量以题型分布为准，避免配置的 totalQuestions 大于题池时向其他课目借题
+  const target = Math.min(config.totalQuestions || needSum, needSum) || needSum;
   const result = [];
-  
-  // 过滤该考试专属题目
-  let pool = bank;
-  if (examId) {
-    const filtered = bank.filter(q => q.examId === examId);
-    if (filtered.length > 0) pool = filtered;
+
+  // ---- 第一步：确定本场考试题池（课目隔离）----
+  let pool = Array.isArray(bank) ? bank : [];
+  const tagged = pool.some(q => q && q.examId);
+  if (tagged) {
+    if (!examId) {
+      console.error('[pick] 题库带课目标签但未指定 examId，拒绝抽题');
+      return [];
+    }
+    pool = pool.filter(q => q.examId === examId);
+    if (pool.length === 0) {
+      console.error('[pick] 本场课目题池为空，拒绝跨课目兜底:', examId);
+      return [];
+    }
   }
-  
+
   const byType = { single: [], multiple: [], judge: [], short: [] };
   for (const q of pool) {
     const t = q.type || 'single';
     if (byType[t]) byType[t].push(q);
   }
-  
-  // 全量题库（用于补充替换题目）
-  const fullByType = { single: [], multiple: [], judge: [], short: [] };
-  for (const q of bank) {
-    const t = q.type || 'single';
-    if (fullByType[t]) fullByType[t].push(q);
-  }
-  
-  // 已选题目的 ID 集合（防止重复）
-  const pickedIds = new Set();
-  
+
+  // ---- 第二步：按题型在「本场题池」内随机抽取（题池有余量时即备选题轮换）----
   for (const type of TYPE_ORDER) {
     const need = dist[type] || 0;
     const typePool = byType[type] || [];
-    const fullTypePool = fullByType[type] || [];
-    
-    if (typePool.length === 0) continue;
-    
-    // 第一步：从过滤池中随机选 need 题
-    const shuffled = shuffle(typePool);
-    const picked = shuffled.slice(0, Math.min(need, shuffled.length));
-    for (const q of picked) pickedIds.add(q.id);
-    
-    // 第二步：如果有 replaceCount，从全量题库中随机替换部分题目
-    if (replaceCount > 0 && fullTypePool.length > need) {
-      const replaceRatio = need / totalNeed; // 按比例分配替换名额
-      const toReplace = Math.max(1, Math.round(replaceCount * replaceRatio));
-      const replaceCountForType = Math.min(toReplace, picked.length);
-      
-      // 从未被选中的全量题库中随机抽替换题
-      const candidates = shuffle(fullTypePool.filter(q => !pickedIds.has(q.id)));
-      const replacements = candidates.slice(0, replaceCountForType);
-      
-      // 执行替换：随机替换掉 picked 中的部分题目
-      const replaceIndices = shuffle([...Array(picked.length).keys()]).slice(0, replacements.length);
-      for (let i = 0; i < replacements.length && i < replaceIndices.length; i++) {
-        const oldId = picked[replaceIndices[i]].id;
-        pickedIds.delete(oldId);
-        picked[replaceIndices[i]] = replacements[i];
-        pickedIds.add(replacements[i].id);
-      }
-    }
-    
+    if (need <= 0 || typePool.length === 0) continue;
+    const picked = shuffle(typePool).slice(0, Math.min(need, typePool.length));
     for (const q of picked) result.push({ ...q, _type: type });
   }
-  if (result.length < config.totalQuestions) {
+
+  // ---- 第三步：题量不足时只在本场题池内补足（绝不跨课目）----
+  if (result.length < target) {
     const existingIds = new Set(result.map(q => q.id));
-    const poolShuffled = shuffle(pool);
-    for (const q of poolShuffled) {
-      if (result.length >= config.totalQuestions) break;
+    for (const q of shuffle(pool)) {
+      if (result.length >= target) break;
       if (!existingIds.has(q.id)) { result.push({ ...q, _type: q.type || 'single' }); existingIds.add(q.id); }
-    }
-    if (result.length < config.totalQuestions) {
-      const allShuffled = shuffle(bank);
-      for (const q of allShuffled) {
-        if (result.length >= config.totalQuestions) break;
-        if (!existingIds.has(q.id)) { result.push({ ...q, _type: q.type || 'single' }); existingIds.add(q.id); }
-      }
     }
   }
   result.sort((a, b) => {
@@ -1052,7 +1026,7 @@ app.get('/api/exams', async (req, res) => {
         if (!m) return null;
         return {
           id: m.id, title: m.title, panel, brand: m.brand || '新品',
-          duration: 40, questionFile: m.questionFile, totalQuestions: 18, replaceCount: 5,
+          duration: 40, questionFile: m.questionFile, totalQuestions: 18,
           distribution: m.distribution || { single: 8, multiple: 5, judge: 4, short: 1 }
         };
       }).filter(Boolean);
@@ -1137,9 +1111,19 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
     }
     questions = picked;
   } else if (exam.distribution) {
-    questions = pickQuestions(bank, exam, exam.panel === 'newbie' ? exam.id : null);
+    // 一律传本场 exam.id：题库是否按课目隔离由 pickQuestions 依据题库是否有 examId 标签判定
+    questions = pickQuestions(bank, exam, exam.id);
   } else {
-    questions = shuffle(bank).slice(0, exam.totalQuestions);
+    // 兜底分支同样遵守课目隔离：带 examId 标签的题库必须按本场 examId 过滤，绝不跨课目捞题
+    let pool = bank;
+    if (bank.some(q => q && q.examId)) {
+      pool = bank.filter(q => q.examId === exam.id);
+      if (pool.length === 0) {
+        console.error('[exam] 兜底分支题池为空，拒绝跨课目兜底:', exam.id);
+        return res.status(500).json({ error: '题库配置异常，请联系管理员' });
+      }
+    }
+    questions = shuffle(pool).slice(0, exam.totalQuestions);
   }
 
   // ===== 安全（服务端发卷）：记录权威题目建会话，客户端只下发去答案版 =====
