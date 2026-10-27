@@ -77,10 +77,22 @@ function $$(sel){ return document.querySelectorAll(sel); }
 function escapeHtml(s){ const d=document.createElement('div');d.textContent=s;return d.innerHTML; }
 function jsEscape(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 function formatTime(sec){ const m=Math.floor(sec/60),s=sec%60; return `${m}:${String(s).padStart(2,'0')}`; }
+// 设备标识：仅用于审计日志里关联「同一台设备登录过哪些账号」，不含任何个人信息
+function getDeviceId(){
+  try {
+    let d = localStorage.getItem('quiz_device_id');
+    if (!d){
+      d = 'dv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem('quiz_device_id', d);
+    }
+    return d;
+  } catch(e){ return 'unknown-device'; }
+}
 function api(path, opts={}){
   const url = path.startsWith('http') ? path : API_BASE + path;
   const headers = opts.headers || { 'Content-Type':'application/json' };
   if (state.authToken) headers['x-auth-token'] = state.authToken;
+  if (!headers['x-device-id']) headers['x-device-id'] = getDeviceId();
   // 请求超时兜底：20秒无响应则中断（防止冷启动/网络卡死时按钮永久无反应）
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeout || 20000);
@@ -326,7 +338,7 @@ function renderLoginForm(tab){
 async function doLogin(username, password){
   try {
     const res = await fetch(API_BASE + '/api/auth/login', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json', 'x-device-id': getDeviceId()},
       body:JSON.stringify({ username, password })
     }).then(r => r.json());
     if (res.success){
@@ -350,7 +362,7 @@ async function doLogin(username, password){
 async function doRegister(username, password, name){
   try {
     const res = await fetch(API_BASE + '/api/auth/register', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json', 'x-device-id': getDeviceId()},
       body:JSON.stringify({ username, password, name })
     }).then(r => r.json());
     if (res.success){
@@ -1201,8 +1213,8 @@ function renderMentor(app){
   const tabs = ['overview','records','scoring','students','question_bank','weak_areas'];
   const tabLabels = { overview:'数据看板', records:'答题记录', scoring:'评分管理', students:'学员管理', question_bank:'题库管理', weak_areas:'查缺补漏' };
   // 导师/管理员额外标签
-  const extraTabs = ['product_banks'];
-  const extraLabels = { product_banks:'产品题库导入管理' };
+  const extraTabs = ['product_banks', 'audit'];
+  const extraLabels = { product_banks:'产品题库导入管理', audit:'审计日志' };
 
   app.innerHTML = `
     <div class="header">
@@ -1228,6 +1240,7 @@ function renderMentor(app){
     case 'question_bank': renderMentorQuestionBank(); break;
     case 'weak_areas': renderMentorWeakAreas(); break;
     case 'product_banks': renderProductBankManager(); break;
+    case 'audit': renderMentorAudit('#mentorContent'); break;
   }
 }
 
@@ -2572,8 +2585,8 @@ async function loadAdminUsers(){
 }
 
 function renderAdmin(app){
-  const tabs = ['users','assignments'];
-  const tabLabels = { users:'用户管理', assignments:'导师分配' };
+  const tabs = ['users','assignments','audit'];
+  const tabLabels = { users:'用户管理', assignments:'导师分配', audit:'审计日志' };
 
   app.innerHTML = `
     <div class="header">
@@ -2593,6 +2606,7 @@ function renderAdmin(app){
   switch(state.adminTab){
     case 'users': renderAdminUsers(); break;
     case 'assignments': renderAdminAssignments(); break;
+    case 'audit': renderMentorAudit('#adminContent'); break;
   }
 }
 
@@ -2981,6 +2995,226 @@ function restoreSession(){
   }
 }
 
+// ================= 审计日志（登录记录 / 操作记录 / 账号-设备关系） =================
+let auditView = { tab:'logins', logins:[], ops:[], identity:null, user:'', result:'', action:'' };
+let _auditTimer = null;
+const AUDIT_ROLE_LABELS = { admin:'超管', mentor:'导师', student:'学员' };
+
+function auditRoleLabel(r){ return AUDIT_ROLE_LABELS[r] || (r ? r : '未知'); }
+function auditTime(ts){ return ts ? new Date(ts).toLocaleString('zh-CN', { hour12:false }) : '-'; }
+function auditDevice(d){ return d && d !== 'unknown-device' ? d : '-'; }
+function auditDebounced(fn){ clearTimeout(_auditTimer); _auditTimer = setTimeout(fn, 350); }
+
+function renderMentorAudit(containerSel){
+  const isAdmin = state.currentUser.role === 'admin';
+  const v = auditView;
+  const sel = containerSel || v.container || '#mentorContent';
+  v.container = sel;
+  const root = $(sel);
+  root.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-sm ${v.tab==='logins'?'btn-primary':'btn-outline'}" onclick="APP.switchAuditTab('logins')">登录记录</button>
+      <button class="btn btn-sm ${v.tab==='ops'?'btn-primary':'btn-outline'}" onclick="APP.switchAuditTab('ops')">操作记录</button>
+      <button class="btn btn-sm ${v.tab==='identity'?'btn-primary':'btn-outline'}" onclick="APP.switchAuditTab('identity')">账号-设备关系</button>
+      <span style="font-size:12px;color:var(--text-sec);margin-left:auto">
+        ${isAdmin ? '超管视角：可查看全部记录（含超管自己）' : '导师视角：可查看除超管外的全部记录'}
+      </span>
+    </div>
+    <div id="auditFilters"></div>
+    <div id="auditBody"><div class="empty-state"><div class="empty-state-text">加载中...</div></div></div>`;
+
+  const filters = $('#auditFilters');
+  if (v.tab === 'identity'){
+    filters.innerHTML = '';
+  } else if (v.tab === 'logins'){
+    filters.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <input class="form-input" id="auditUserInput" placeholder="🔍 账号 / 姓名 / IP" style="width:220px;padding:6px 10px;font-size:13px" value="${escapeHtml(v.user)}">
+        <select class="form-input" id="auditResultSel" style="width:130px;padding:6px 10px;font-size:13px">
+          <option value="">全部结果</option>
+          <option value="ok"${v.result==='ok'?' selected':''}>登录成功</option>
+          <option value="fail"${v.result==='fail'?' selected':''}>登录失败</option>
+        </select>
+      </div>`;
+    bindAuditFilters('logins');
+  } else {
+    filters.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <input class="form-input" id="auditUserInput" placeholder="🔍 操作人账号 / 姓名" style="width:200px;padding:6px 10px;font-size:13px" value="${escapeHtml(v.user)}">
+        <input class="form-input" id="auditActionInput" placeholder="按操作类型筛选（如：题库、评分）" style="width:240px;padding:6px 10px;font-size:13px" value="${escapeHtml(v.action)}">
+      </div>`;
+    bindAuditFilters('ops');
+  }
+
+  if (v.tab === 'logins') loadAuditLogins();
+  else if (v.tab === 'ops') loadAuditOps();
+  else loadAuditIdentity();
+}
+
+function bindAuditFilters(tab){
+  if (tab === 'logins'){
+    bindSearchInput($('#auditUserInput'), v => { auditView.user = v; auditDebounced(loadAuditLogins); });
+    const sel = $('#auditResultSel');
+    if (sel) sel.onchange = () => { auditView.result = sel.value; loadAuditLogins(); };
+  } else {
+    bindSearchInput($('#auditUserInput'), v => { auditView.user = v; auditDebounced(loadAuditOps); });
+    bindSearchInput($('#auditActionInput'), v => { auditView.action = v; auditDebounced(loadAuditOps); });
+  }
+}
+
+function switchAuditTab(tab){
+  auditView.tab = tab;
+  renderMentorAudit();
+}
+
+async function loadAuditLogins(){
+  const body = $('#auditBody');
+  if (!body) return;
+  const params = new URLSearchParams();
+  if (auditView.user) params.set('user', auditView.user);
+  if (auditView.result) params.set('result', auditView.result);
+  params.set('limit', '300');
+  let res;
+  try { res = await api('/api/audit/logins?' + params.toString()); }
+  catch(e){ if ($('#auditBody')) $('#auditBody').innerHTML = `<div class="empty-state"><div class="empty-state-text">加载失败</div></div>`; return; }
+  if (!$('#auditBody')) return;
+  if (!res || !res.success) { $('#auditBody').innerHTML = `<div class="empty-state"><div class="empty-state-text">${escapeHtml((res&&res.error)||'加载失败')}</div></div>`; return; }
+  auditView.logins = res.items || [];
+  renderAuditLoginsTable(res.total || 0);
+}
+
+function renderAuditLoginsTable(total){
+  const items = auditView.logins;
+  let html = `<div style="font-size:13px;color:var(--text-sec);margin-bottom:10px">共 ${total} 条记录，显示最近 ${items.length} 条</div>`;
+  if (!items.length){
+    html += `<div class="empty-state"><div class="empty-state-text">暂无登录记录</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="table">
+      <thead><tr><th>时间</th><th>输入账号</th><th>姓名</th><th>角色</th><th>结果</th><th>原因</th><th>IP</th><th>设备</th><th>浏览器</th></tr></thead>
+      <tbody>${items.map(e => `<tr>
+        <td style="font-size:12px;white-space:nowrap">${auditTime(e.t)}</td>
+        <td>${escapeHtml(e.username || '-')}</td>
+        <td>${escapeHtml(e.name || '-')}</td>
+        <td style="font-size:12px">${auditRoleLabel(e.role)}</td>
+        <td>${e.result === 'ok' ? '<span class="badge badge-success">成功</span>' : '<span class="badge badge-danger">失败</span>'}</td>
+        <td style="font-size:12px;color:var(--text-sec)">${escapeHtml(e.reason || '-')}</td>
+        <td style="font-size:12px">${escapeHtml(e.ip || '-')}</td>
+        <td style="font-size:11px;color:var(--text-sec)" title="${escapeHtml(e.deviceId || '')}">${escapeHtml(auditDevice(e.deviceId))}</td>
+        <td style="font-size:11px;color:var(--text-sec);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(e.ua || '')}">${escapeHtml(e.ua || '-')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  $('#auditBody').innerHTML = html;
+}
+
+async function loadAuditOps(){
+  const body = $('#auditBody');
+  if (!body) return;
+  const params = new URLSearchParams();
+  if (auditView.user) params.set('user', auditView.user);
+  if (auditView.action) params.set('action', auditView.action);
+  params.set('limit', '300');
+  let res;
+  try { res = await api('/api/audit/ops?' + params.toString()); }
+  catch(e){ if ($('#auditBody')) $('#auditBody').innerHTML = `<div class="empty-state"><div class="empty-state-text">加载失败</div></div>`; return; }
+  if (!$('#auditBody')) return;
+  if (!res || !res.success) { $('#auditBody').innerHTML = `<div class="empty-state"><div class="empty-state-text">${escapeHtml((res&&res.error)||'加载失败')}</div></div>`; return; }
+  auditView.ops = res.items || [];
+  renderAuditOpsTable(res.total || 0);
+}
+
+function renderAuditOpsTable(total){
+  const items = auditView.ops;
+  let html = `<div style="font-size:13px;color:var(--text-sec);margin-bottom:10px">共 ${total} 条记录，显示最近 ${items.length} 条</div>`;
+  if (!items.length){
+    html += `<div class="empty-state"><div class="empty-state-text">暂无操作记录</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="table">
+      <thead><tr><th>时间</th><th>操作人</th><th>角色</th><th>操作</th><th>对象</th><th>结果</th><th>耗时</th><th>IP</th><th>设备</th></tr></thead>
+      <tbody>${items.map(e => `<tr>
+        <td style="font-size:12px;white-space:nowrap">${auditTime(e.t)}</td>
+        <td>${escapeHtml(e.name || e.uid || '-')}</td>
+        <td style="font-size:12px">${auditRoleLabel(e.role)}</td>
+        <td>${escapeHtml(e.action || '-')}</td>
+        <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(e.target || '')}">${escapeHtml(e.target || '-')}</td>
+        <td style="font-size:12px">${e.result === 'ok' ? '<span class="badge badge-success">成功</span>' : `<span class="badge badge-danger">${escapeHtml(e.result || '失败')}</span>`}</td>
+        <td style="font-size:12px;color:var(--text-sec)">${e.ms ? e.ms + 'ms' : '-'}</td>
+        <td style="font-size:12px">${escapeHtml(e.ip || '-')}</td>
+        <td style="font-size:11px;color:var(--text-sec)" title="${escapeHtml(e.deviceId || '')}">${escapeHtml(auditDevice(e.deviceId))}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  $('#auditBody').innerHTML = html;
+}
+
+async function loadAuditIdentity(){
+  const body = $('#auditBody');
+  if (!body) return;
+  let res;
+  try { res = await api('/api/audit/identity?limit=1'); }
+  catch(e){ if ($('#auditBody')) $('#auditBody').innerHTML = `<div class="empty-state"><div class="empty-state-text">加载失败</div></div>`; return; }
+  if (!$('#auditBody')) return;
+  if (!res || !res.success) { $('#auditBody').innerHTML = `<div class="empty-state"><div class="empty-state-text">${escapeHtml((res&&res.error)||'加载失败')}</div></div>`; return; }
+  auditView.identity = res;
+  renderAuditIdentity(res);
+}
+
+function renderAuditIdentity(res){
+  const byDevice = res.byDevice || [];
+  const byIp = res.byIp || [];
+
+  const deviceRows = byDevice.filter(d => d.accountCount > 1);
+  const ipRows = byIp.filter(d => d.accountCount > 1);
+
+  let html = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">同一台设备登录过多个账号（${deviceRows.length} 组）</div>
+      <div style="font-size:12px;color:var(--text-sec);margin-bottom:10px">重点排查：正常学员只会用自己设备登录自己的账号。出现 2 个及以上账号即需核实。</div>`;
+  if (!deviceRows.length){
+    html += `<div class="empty-state"><div class="empty-state-text">未发现同设备多账号</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="table">
+      <thead><tr><th>设备</th><th>账号数</th><th>涉及账号</th><th>登录IP</th><th>登录次数</th><th>操作次数</th><th>失败次数</th><th>最近活动</th></tr></thead>
+      <tbody>${deviceRows.map(d => `<tr>
+        <td style="font-size:11px" title="${escapeHtml(d.key)}">${escapeHtml(auditDevice(d.key))}</td>
+        <td><strong style="color:var(--danger)">${d.accountCount}</strong></td>
+        <td style="font-size:12px">${escapeHtml(d.accounts.join('、'))}</td>
+        <td style="font-size:12px">${escapeHtml(d.ips.join('、') || '-')}</td>
+        <td>${d.logins}</td>
+        <td>${d.ops}</td>
+        <td>${d.fails}</td>
+        <td style="font-size:12px;white-space:nowrap">${auditTime(d.lastSeen)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  html += `</div>`;
+
+  html += `
+    <div class="card">
+      <div class="card-title">同一 IP 登录过多个账号（${ipRows.length} 组）</div>
+      <div style="font-size:12px;color:var(--text-sec);margin-bottom:10px">同一公网 IP 可能是一个办公室的多人，也可能是一人换号，需结合设备维度一起看。</div>`;
+  if (!ipRows.length){
+    html += `<div class="empty-state"><div class="empty-state-text">未发现同 IP 多账号</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="table">
+      <thead><tr><th>IP</th><th>账号数</th><th>涉及账号</th><th>设备数</th><th>登录次数</th><th>操作次数</th><th>失败次数</th><th>最近活动</th></tr></thead>
+      <tbody>${ipRows.map(d => `<tr>
+        <td style="font-size:12px">${escapeHtml(d.key)}</td>
+        <td><strong style="color:${d.accountCount > 2 ? 'var(--danger)' : 'var(--warning)'}">${d.accountCount}</strong></td>
+        <td style="font-size:12px">${escapeHtml(d.accounts.join('、'))}</td>
+        <td>${d.devices.length}</td>
+        <td>${d.logins}</td>
+        <td>${d.ops}</td>
+        <td>${d.fails}</td>
+        <td style="font-size:12px;white-space:nowrap">${auditTime(d.lastSeen)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  html += `</div>`;
+
+  $('#auditBody').innerHTML = html;
+}
+
 // ===== 暴露 API =====
 window.APP = {
   // Auth
@@ -3007,6 +3241,8 @@ window.APP = {
   openEditQuestion, saveEditQuestion, openAddQuestion, saveAddQuestion, deleteQuestion,
   // Weak Areas
   renderMentorWeakAreas, viewStudentWeakDetail,
+  // 审计日志
+  renderMentorAudit, switchAuditTab, loadAuditLogins, loadAuditOps, loadAuditIdentity,
   // New Products → Product Bank Manager
   renderProductBankManager, downloadTemplate, openImportProduct, handleNpFile, importNewProduct, deleteNewProduct,
   openAddModule, createModule, deleteModule, openAssignBanks, saveAssignBanks,

@@ -50,6 +50,11 @@ const db = require('./db');
 // ===== AI 倾向检测（本地多维，可解释，供导师参考） =====
 const aiDetect = require('./aiDetect');
 
+// ===== 审计日志（登录记录/操作记录，纯旁路） =====
+const auditLog = require('./auditLog');
+// 审计埋点：注册在业务路由之前，响应结束时旁路记录，不影响主流程
+app.use('/api', auditLog.middleware());
+
 // ===== 访问日志（IP/UA/时间/路径，可追溯爬虫与异常访问） =====
 const ACCESS_LOG_KEY = 'access_log.json';
 const _accessBuf = [];
@@ -688,18 +693,28 @@ app.post('/api/auth/login', rateLimit(60000, 20, req => 'lg:' + (req.headers['x-
   if (!user) {
     // 按姓名匹配
     const byName = Object.values(users).filter(u => u.name === username);
-    if (byName.length === 0) return res.status(401).json({ error: '账号不存在，请核对用户名或姓名' });
-    if (byName.length > 1) return res.status(401).json({ error: `该姓名对应 ${byName.length} 个账号，请改用用户名登录` });
+    if (byName.length === 0) {
+      auditLog.recordLogin(req, { username, user: null, result: 'fail', reason: '账号不存在' });
+      return res.status(401).json({ error: '账号不存在，请核对用户名或姓名' });
+    }
+    if (byName.length > 1) {
+      auditLog.recordLogin(req, { username, user: byName[0], result: 'fail', reason: `姓名重复(${byName.length}个账号)` });
+      return res.status(401).json({ error: `该姓名对应 ${byName.length} 个账号，请改用用户名登录` });
+    }
     user = byName[0];
   }
 
-  if (!checkPassword(user, password)) return res.status(401).json({ error: '密码错误' });
+  if (!checkPassword(user, password)) {
+    auditLog.recordLogin(req, { username, user, result: 'fail', reason: '密码错误' });
+    return res.status(401).json({ error: '密码错误' });
+  }
 
   const token = generateToken();
   user.token = token;
   users[user.username] = user;
   await db.writeRaw('users.json', users);
-  
+
+  auditLog.recordLogin(req, { username, user, result: 'ok', reason: '' });
   res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, token } });
 });
 
@@ -2331,6 +2346,40 @@ app.post('/api/mentor/reset-attempts', mentorAuth, async (req, res) => {
     await db.writeRaw('records.json', remaining);
   });
   res.json({ success: true, removedCount });
+});
+
+// ===== 审计日志查询（仅导师/管理员） =====
+// 可见性规则：
+//   · 超管（admin）可见全部记录，包括超管自己的
+//   · 导师（mentor）可见除超管以外的所有记录（学员/导师）
+app.get('/api/audit/logins', mentorAuth, async (req, res) => {
+  try {
+    const viewerRole = req.currentUser.role;
+    const data = await auditLog.queryLogins(req.query, viewerRole);
+    res.json({ success: true, ...data });
+  } catch (e) {
+    res.status(500).json({ error: '读取登录记录失败' });
+  }
+});
+
+app.get('/api/audit/ops', mentorAuth, async (req, res) => {
+  try {
+    const viewerRole = req.currentUser.role;
+    const data = await auditLog.queryOps(req.query, viewerRole);
+    res.json({ success: true, ...data });
+  } catch (e) {
+    res.status(500).json({ error: '读取操作记录失败' });
+  }
+});
+
+app.get('/api/audit/identity', mentorAuth, async (req, res) => {
+  try {
+    const viewerRole = req.currentUser.role;
+    const data = await auditLog.queryIdentity(req.query, viewerRole);
+    res.json({ success: true, ...data, viewerRole });
+  } catch (e) {
+    res.status(500).json({ error: '读取账号关系失败' });
+  }
 });
 
 // ===== 从 Supabase 恢复题库文件（启动时） =====
