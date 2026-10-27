@@ -694,6 +694,7 @@ async function startExam(examId){
   }
   state.currentExam = res.exam;
   state.questions = res.questions;
+  state.sessionId = res.sessionId; // 服务端发卷会话ID，提交时回传，杜绝客户端篡改/再次下发答案
   state.answers = {};
   state.attemptNumber = res.attemptNumber;
   state.remainingAttempts = res.remainingAttempts;
@@ -875,7 +876,8 @@ async function submitQuiz(){
     studentName: state.currentUser.name,
     examId: state.currentExam.id,
     panel: state.panel,
-    questions: state.questions,
+    sessionId: state.sessionId, // 服务端发卷会话，判分以会话内权威题为准，客户端不再回传题目/答案
+    questions: [], // 不再回传题目，服务端用会话取权威题判分，杜绝篡改
     answers: state.answers,
     attemptNumber: state.attemptNumber,
     submitTime: new Date().toISOString(),
@@ -1546,14 +1548,17 @@ function renderMentorScoringSub(filter){
     if (!group || group.length === 0) continue;
     html += `<div style="margin-bottom:12px"><strong>${getModuleName(panel)}</strong></div>`;
     html += `<div class="table-wrap"><table class="table">
-      <thead><tr><th>学员</th><th>考试</th><th>自动评分</th><th>导师评分</th><th>最终</th><th>操作</th></tr></thead>
+      <thead><tr><th>学员</th><th>考试</th><th>AI倾向</th><th>自动评分</th><th>导师评分</th><th>最终</th><th>操作</th></tr></thead>
       <tbody>${group.sort((a,b) => new Date(b.submitTime) - new Date(a.submitTime)).map(r => {
         const autoScore = r.autoScore || 0;
         const mentorScore = r.mentorScore !== undefined && r.mentorScore !== null ? r.mentorScore : '-';
         const finalScore = r.finalScore !== undefined ? r.finalScore : autoScore;
+        const ai = r.aiCheck && r.aiCheck.score !== undefined ? r.aiCheck : null;
+        const aiCell = ai ? `<span class="badge ${ai.level==='高'?'badge-danger':(ai.level==='中'?'badge-warning':'badge-success')}" title="${escapeHtml((ai.summary||'')+' '+(ai.hits||[]).join('；'))}">${ai.score}分(${ai.level})</span>` : `<span class="text-sec" style="color:var(--text-sec)">—</span>`;
         return `<tr>
           <td>${escapeHtml(r.studentName)}</td>
           <td>${escapeHtml(r.examTitle || r.examId)}</td>
+          <td>${aiCell}</td>
           <td>${autoScore}</td>
           <td>${mentorScore}</td>
           <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore).cls}">${getScoreTag(finalScore).label}</span> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
@@ -2069,16 +2074,34 @@ async function openScoringDetail(recordId){
   if (questions.length === 0){ showToast('无简答题','info'); return; }
   const answers = record.answers || {};
   const mentorDetails = record.mentorScoreDetails || {};
-
+  const aiCheck = record.aiCheck || {};
+  const aiColor = l => l==='高' ? 'var(--danger)' : (l==='中' ? 'var(--warning)' : 'var(--success)');
+  // 单题 AI 倾向徽章 + 命中证据
+  const perQuestionAi = id => {
+    const a = aiCheck.perQuestion && aiCheck.perQuestion[id];
+    if (!a) return '';
+    const c = aiColor(a.level);
+    const hits = (a.hits||[]).map(h => `<div style="font-size:12px;color:var(--text-sec);margin-top:4px">· ${escapeHtml(h)}</div>`).join('');
+    return `<div style="margin:4px 0 8px;padding:6px 10px;border-left:3px solid ${c};background:${c}14;border-radius:6px">
+      <span style="font-size:12px;font-weight:700;color:${c}">AI 倾向 ${a.score}分（${a.level}）</span>
+      ${a.short ? `<span style="font-size:11px;color:var(--text-sec)"> 内容过短</span>` : ''}
+      ${hits}
+    </div>`;
+  };
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div class="modal fade-in" style="max-width:700px">
+    <div class="modal fade-in" style="max-width:760px">
       <div class="modal-header">
         <span>评分 - ${escapeHtml(record.studentName)}</span>
         <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
       </div>
       <div class="modal-body">
+        ${aiCheck.score !== undefined ? `
+        <div style="padding:8px 12px;border-radius:8px;margin-bottom:12px;background:${aiColor(aiCheck.level)}18;border:1px solid ${aiColor(aiCheck.level)}44">
+          <span style="font-weight:700;color:${aiColor(aiCheck.level)}">🤖 AI 综合倾向 ${aiCheck.score}分（${aiCheck.level}）</span>
+          <span style="font-size:12px;color:var(--text-sec);margin-left:8px">${escapeHtml(aiCheck.summary || '')} — 仅供参考，请结合原文与命中证据人工判断</span>
+        </div>` : ''}
         ${questions.map(q => {
           const userAns = answers[q.id] || '(未作答)';
           const prev = mentorDetails[q.id] || {};
@@ -2086,7 +2109,8 @@ async function openScoringDetail(recordId){
           return `<div class="scoring-card">
             <div class="scoring-question"><strong>${escapeHtml(q.question)}</strong>（满分${q.points||10}分）</div>
             <div class="scoring-answer">${escapeHtml(userAns)}</div>
-            ${q.keywords ? `<div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">关键词：${escapeHtml(q.keywords)}</div>` : ''}
+            ${perQuestionAi(q.id)}
+            ${q.answer && q.type==='short' ? `<div style="font-size:12px;color:var(--success);background:var(--success-light);padding:6px 8px;border-radius:6px;margin-bottom:8px"><strong>参考答案：</strong>${escapeHtml(q.answer)}</div>` : ''}
             <div class="scoring-controls">
               <span>导师评分：</span>
               <input class="scoring-input" id="score_${recordId}_${q.id}" type="number" min="0" max="${q.points||10}" value="${prevScore}">
@@ -2094,6 +2118,10 @@ async function openScoringDetail(recordId){
             </div>
           </div>`;
         }).join('')}
+        <div class="form-group" style="margin-top:8px">
+          <label style="font-size:13px;font-weight:700;display:block;margin-bottom:6px">📝 导师点评</label>
+          <textarea id="mentorComment_${recordId}" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;resize:vertical" placeholder="给该学员写点评，将随成绩一起导出至 CSV，方便后续跟踪与辅导">${escapeHtml(record.mentorComment || '')}</textarea>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
@@ -2135,12 +2163,17 @@ async function saveMentorScore(recordId){
   newTypeScores.short = { score:shortScore, max:shortMax };
   const totalScore = objectiveScore + shortScore;
 
+  // 读取导师点评并随成绩一并提交，导出时随 CSV 一起导出
+  const commentEl = document.getElementById(`mentorComment_${recordId}`);
+  const mentorComment = commentEl ? commentEl.value.trim() : (record.mentorComment || '');
+
   try {
     const res = await api(`/api/mentor/records/${recordId}/score`, {
       method:'PUT', body:JSON.stringify({
         mentorScore: shortScore, finalScore: totalScore,
         passed: totalScore >= PASSING_SCORE, mentorScored: true,
-        mentorScoreDetails, questionScores: newQuestionScores, typeScores: newTypeScores
+        mentorScoreDetails, questionScores: newQuestionScores, typeScores: newTypeScores,
+        mentorComment
       })
     });
     if (res.success){

@@ -29,6 +29,7 @@ app.use('/api', (req, res, next) => {
   res.set('Expires', '0');
   next();
 });
+app.use('/api', (req, res, next) => { recordAccess(req); next(); });
 app.use(express.static(path.join(__dirname), {
   setHeaders: (res, p) => {
     if (p.endsWith('.js') || p.endsWith('.html')) res.set('Cache-Control', 'no-cache');
@@ -45,6 +46,94 @@ const TYPE_ORDER = ['single', 'multiple', 'judge', 'short'];
 
 // ===== 数据持久化：Supabase PostgreSQL =====
 const db = require('./db');
+
+// ===== AI 倾向检测（本地多维，可解释，供导师参考） =====
+const aiDetect = require('./aiDetect');
+
+// ===== 访问日志（IP/UA/时间/路径，可追溯爬虫与异常访问） =====
+const ACCESS_LOG_KEY = 'access_log.json';
+const _accessBuf = [];
+async function recordAccess(req) {
+  try {
+    const ip = req.headers['x-forwarded-for']
+      ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
+      : (req.ip || (req.socket && req.socket.remoteAddress) || '');
+    const ua = String(req.headers['user-agent'] || '').slice(0, 140);
+    const tk = req.headers['x-auth-token'];
+    let name = '';
+    if (tk) {
+      try {
+        const users = await db.readObj('users.json');
+        const u = Object.values(users).find(x => x.token === tk);
+        name = u ? (u.name || u.username) : '';
+      } catch (e) {}
+    }
+    _accessBuf.push({
+      t: Date.now(), ip: String(ip).slice(0, 60), m: req.method,
+      p: String(req.originalUrl || req.url || '').slice(0, 200),
+      ua, n: name
+    });
+    if (_accessBuf.length >= 60) flushAccessLog();
+  } catch (e) {}
+}
+async function flushAccessLog() {
+  if (_accessBuf.length === 0) return;
+  const batch = _accessBuf.splice(0, _accessBuf.length);
+  try {
+    await db.withLock(ACCESS_LOG_KEY, async () => {
+      let arr = await db.readJSONRaw(ACCESS_LOG_KEY);
+      if (!Array.isArray(arr)) arr = [];
+      arr.push(...batch);
+      if (arr.length > 3000) arr = arr.slice(arr.length - 3000);
+      await db.writeRaw(ACCESS_LOG_KEY, arr);
+    });
+  } catch (e) { console.error('[access-log] flush error:', e.message); }
+}
+setInterval(() => flushAccessLog(), 10000); // 每 10s 落盘一次
+
+// ===== 防刷限流（内存滑动窗口） =====
+const _rate = new Map();
+function rateLimit(winMs, max, keyFn) {
+  return (req, res, next) => {
+    try {
+      const key = String(keyFn ? keyFn(req) : (req.ip || ''));
+      const now = Date.now();
+      const cur = _rate.get(key);
+      if (!cur || now - cur.resetAt > winMs) {
+        _rate.set(key, { count: 1, resetAt: now + winMs });
+        return next();
+      }
+      cur.count++;
+      if (cur.count > max) return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    } catch (e) {}
+    next();
+  };
+}
+
+// ===== 服务端发卷会话（隔离题库答案：start-exam 建会话，submit 用会话取权威题判分） =====
+const examSessions = new Map(); // sessionId -> { examId, studentName, questions, createdAt, expiresAt, used }
+const SESSION_KEY = 'exam_sessions.json';
+let _sessionsLoaded = false;
+async function loadExamSessions() {
+  if (_sessionsLoaded) return;
+  try {
+    const obj = await db.readObjRaw(SESSION_KEY);
+    const now = Date.now();
+    for (const k in obj) {
+      const s = obj[k];
+      if (s && !s.used && s.expiresAt > now && Array.isArray(s.questions)) examSessions.set(k, s);
+    }
+  } catch (e) {}
+  _sessionsLoaded = true;
+}
+async function persistExamSessions() {
+  const obj = {};
+  const now = Date.now();
+  for (const [k, s] of examSessions) if (!s.used && s.expiresAt > now) obj[k] = s;
+  try {
+    await db.withLock(SESSION_KEY, async () => { await db.writeRaw(SESSION_KEY, obj); });
+  } catch (e) { console.error('[session] persist error:', e.message); }
+}
 
 // ===== 初始化超级管理员 =====
 async function initSuperAdmin() {
@@ -615,7 +704,7 @@ function checkPassword(user, input) {
   return false;
 }
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', rateLimit(60000, 20, req => 'lg:' + (req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : (req.ip || ''))), async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: '请输入用户名（或姓名）和密码' });
   
@@ -982,13 +1071,21 @@ app.get('/api/exams/:id', async (req, res) => {
 
 // ===== 学员答题 API =====
 
-app.get('/api/records/:studentName', async (req, res) => {
+app.get('/api/records/:studentName', authMiddleware, async (req, res) => {
+  const me = req.currentUser;
+  if (me.name !== req.params.studentName && me.role !== 'mentor' && me.role !== 'admin') {
+    return res.status(403).json({ error: '无权查看该学员记录' });
+  }
   const records = await db.readJSON('records.json');
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
   res.json({ success: true, records: studentRecords });
 });
 
-app.get('/api/attempts/:studentName', async (req, res) => {
+app.get('/api/attempts/:studentName', authMiddleware, async (req, res) => {
+  const me = req.currentUser;
+  if (me.name !== req.params.studentName && me.role !== 'mentor' && me.role !== 'admin') {
+    return res.status(403).json({ error: '无权查看该学员记录' });
+  }
   const records = await db.readJSON('records.json');
   const attempts = {};
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
@@ -996,13 +1093,16 @@ app.get('/api/attempts/:studentName', async (req, res) => {
   res.json({ success: true, attempts, maxAttempts: MAX_ATTEMPTS });
 });
 
-app.post('/api/start-exam', async (req, res) => {
-  const { studentName, examId } = req.body;
-  if (!studentName || !examId) return res.status(400).json({ error: '参数不完整' });
-  
+app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + (req.currentUser && req.currentUser.name ? req.currentUser.name : req.ip)), async (req, res) => {
+  await loadExamSessions();
+  const studentName = req.currentUser ? req.currentUser.name : '';
+  if (!studentName) return res.status(401).json({ error: '未登录' });
+  const { examId } = req.body || {};
+  if (!examId) return res.status(400).json({ error: '参数不完整' });
+
   const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
-  
+
   const records = await db.readJSON('records.json');
   const attemptCount = records.filter(r => r.studentName === studentName && r.examId === examId).length;
   if (attemptCount >= MAX_ATTEMPTS) {
@@ -1019,10 +1119,10 @@ app.post('/api/start-exam', async (req, res) => {
       bestRecord: bestRecord ? { id: bestRecord.id, score: bestRecord.finalScore !== undefined ? bestRecord.finalScore : bestRecord.autoScore, passed: bestRecord.passed, submitTime: bestRecord.submitTime } : null
     });
   }
-  
+
   const bank = loadQuestions(exam.questionFile);
   if (bank.length === 0) return res.status(500).json({ error: '题库加载失败，请联系管理员' });
-  
+
   let questions;
   // ===== 场景化专项 · 固定整卷：不抽题不放回，按 examIdFilter 精确取全部题，保持题目顺序 =====
   if (exam && exam.fixed && exam.examIdFilter) {
@@ -1041,41 +1141,78 @@ app.post('/api/start-exam', async (req, res) => {
   } else {
     questions = shuffle(bank).slice(0, exam.totalQuestions);
   }
-  
+
+  // ===== 安全（服务端发卷）：记录权威题目建会话，客户端只下发去答案版 =====
+  const sessionId = 'sess_' + crypto.randomBytes(12).toString('hex');
+  examSessions.set(sessionId, {
+    examId, studentName,
+    questions, // 含 answer/explain/keywords（仅供服务端判分与导师评分，绝不下发）
+    createdAt: Date.now(),
+    expiresAt: Date.now() + (exam.duration * 60 + 5) * 1000,
+    used: false
+  });
+  await persistExamSessions();
+
+  // 客户端答卷只需题型/题干/选项/分值，剥离答案、解析、关键词与评分细则
+  const clientQuestions = questions.map(q => {
+    const { answer, explain, keywords, examineRule, ...rest } = q || {};
+    return rest;
+  });
+
   res.json({
-    success: true, exam, questions,
+    success: true, exam, sessionId,
+    questions: clientQuestions,
     attemptNumber: attemptCount + 1,
     remainingAttempts: MAX_ATTEMPTS - attemptCount - 1,
     timeLimit: exam.duration * 60
   });
 });
 
-app.post('/api/records', async (req, res) => {
-  const record = req.body;
-  if (!record.studentName || !record.examId) return res.status(400).json({ error: '数据不完整' });
-  
+app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (req.currentUser && req.currentUser.name ? req.currentUser.name : req.ip)), async (req, res) => {
+  const body = req.body || {};
+  const studentName = req.currentUser ? req.currentUser.name : '';
+  if (!studentName) return res.status(401).json({ error: '未登录' });
+  if (!body.examId) return res.status(400).json({ error: '数据不完整' });
+
+  // ===== 安全（服务端发卷会话）：只信任会话内的权威题目，不信任客户端回传的 questions =====
+  await loadExamSessions();
+  const session = examSessions.get(body.sessionId);
+  if (!session) return res.status(400).json({ error: '试卷会话不存在，请重新开始考试' });
+  if (session.used) return res.status(400).json({ error: '该试卷已提交过，请勿重复提交' });
+  if (session.expiresAt < Date.now()) return res.status(400).json({ error: '试卷已超时，请重新开始考试' });
+  if (session.studentName !== studentName) return res.status(403).json({ error: '身份校验失败' });
+  if (session.examId !== body.examId) return res.status(400).json({ error: '考试不匹配，请重新开始' });
+
+  const seed = { ...body, studentName };
+  let record = null;
   // 整段「读-改-写」加锁：防止多人同时提交时互相覆盖丢记录
   let savedRecord = null;
   let dupResult = null;
   await db.withLock('records.json', async () => {
     const records = await db.readJSONRaw('records.json');
-    
-    if (record.id) {
-      const dupId = records.find(r => r.id === record.id);
+
+    if (seed.id) {
+      const dupId = records.find(r => r.id === seed.id);
       if (dupId) { console.log('[dedup] ID duplicate'); dupResult = { record: dupId, deduped: true }; return; }
     }
-    
+
     const dupTime = records.find(r =>
-      r.studentName === record.studentName && r.examId === record.examId &&
-      Math.abs(new Date(r.submitTime).getTime() - new Date(record.submitTime).getTime()) < 5000
+      r.studentName === studentName && r.examId === seed.examId &&
+      Math.abs(new Date(r.submitTime).getTime() - new Date(seed.submitTime).getTime()) < 5000
     );
     if (dupTime) { console.log('[dedup] Time duplicate'); dupResult = { record: dupTime, deduped: true }; return; }
-    
-    const questions = record.questions || [];
+
+    // 以会话内权威题目为准（含 answer/explain/keywords），服务端重新判分，不信任客户端任何分数
+    const questions = session.questions || [];
+    const recordSafe = { ...seed };
+    recordSafe.questions = questions; // 服务端保存权威题目，供导师评分/导出复核
+    recordSafe.studentName = studentName;
+    recordSafe.sessionId = seed.sessionId;
+
     let autoScore = 0;
     const questionScores = {};
     const typeScores = { single: { score: 0, max: 0 }, multiple: { score: 0, max: 0 }, judge: { score: 0, max: 0 }, short: { score: 0, max: 0 } };
-    
+
     // 归一化答案格式：数组→排序字符串，布尔→A/B，字符串→原样
     function normalizeAns(ans) {
       if (ans === null || ans === undefined) return '';
@@ -1083,11 +1220,11 @@ app.post('/api/records', async (req, res) => {
       if (typeof ans === 'boolean') return ans ? 'A' : 'B';
       return String(ans);
     }
-    
+
     for (const q of questions) {
       const qType = q.type || q._type || 'single';
       const points = q.points || 5;
-      const userAnswer = (record.answers || {})[q.id];
+      const userAnswer = (recordSafe.answers || {})[q.id];
       let score = 0;
       // 主观题（简答/配推/情景/大案例，manual=true）不自动评分，由导师人工评分；此处仅登记答题内容
       if (q.manual) {
@@ -1109,26 +1246,34 @@ app.post('/api/records', async (req, res) => {
       typeScores[qType].score += score;
       typeScores[qType].max += points;
     }
-    
-    if (!record.id) record.id = 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    record.submitTime = record.submitTime || new Date().toISOString();
-    record.autoScore = autoScore;
-    record.finalScore = autoScore;
+
+    // ===== AI 倾向检测（简答题）：本地多维，0-100 分 + 等级 + 命中证据，导师评分时参考 =====
+    try {
+      const shortQs = questions.filter(q => q.type === 'short');
+      recordSafe.aiCheck = aiDetect.detectRecord(shortQs, recordSafe.answers || {});
+    } catch (e) { console.error('[ai] detect error:', e.message); }
+
+    if (!recordSafe.id) recordSafe.id = 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    recordSafe.submitTime = recordSafe.submitTime || new Date().toISOString();
+    recordSafe.autoScore = autoScore;
+    recordSafe.finalScore = autoScore;
     // 固定整卷按该卷通过线判定；其余沿用全局通过线
-    const examCfg = (await getAllExams()).find(e => e.id === record.examId);
+    const examCfg = (await getAllExams()).find(e => e.id === recordSafe.examId);
     const passLine = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
-    record.passScore = passLine;
-    record.passed = autoScore >= passLine;
-    record.questionScores = questionScores;
-    record.typeScores = typeScores;
-    record.mentorScored = false;
-    record.mentorPending = (record.panel === 'scene');
-    
-    records.push(record);
+    recordSafe.passScore = passLine;
+    recordSafe.passed = autoScore >= passLine;
+    recordSafe.questionScores = questionScores;
+    recordSafe.typeScores = typeScores;
+    recordSafe.mentorScored = false;
+    recordSafe.mentorPending = (recordSafe.panel === 'scene');
+
+    records.push(recordSafe);
     await db.writeRaw('records.json', records);
-    savedRecord = record;
+    session.used = true; // 标记会话已使用，防止同一试卷会话重复提交
+    savedRecord = recordSafe;
   });
-  
+  await persistExamSessions(); // 持久化会话已使用状态
+
   if (dupResult) return res.json({ success: true, ...dupResult });
   if (savedRecord) {
     console.log('[records] New:', savedRecord.studentName, savedRecord.examId, 'score:', savedRecord.autoScore);
@@ -1235,9 +1380,11 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
   }
   
   const panelLabels = PANEL_LABELS;
-  const rows = [['学员姓名', '板块', '考试ID', '考试标题', '自动评分', '导师评分', '最终得分', '是否通过', '是否已评', '答题次数', '提交时间', '用时(秒)']];
+  const rows = [['学员姓名', '板块', '考试ID', '考试标题', '自动评分', '导师评分', '最终得分', '是否通过', '是否已评', '答题次数', '提交时间', '用时(秒)', 'AI倾向', '导师点评']];
   for (const r of filtered) {
     const exam = exams.find(e => e.id === r.examId);
+    const ai = r.aiCheck || {};
+    const aiLabel = ai.score !== undefined ? `${ai.score}分(${ai.level})` : '';
     rows.push([
       r.studentName,
       panelLabels[r.panel] || r.panel || '',
@@ -1250,7 +1397,9 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
       r.mentorScored ? '是' : '否',
       r.attemptNumber || 1,
       r.submitTime || '',
-      r.timeSpent || ''
+      r.timeSpent || '',
+      aiLabel,
+      r.mentorComment !== undefined && r.mentorComment !== null ? String(r.mentorComment) : ''
     ]);
   }
   
@@ -1291,7 +1440,7 @@ app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
 });
 
 app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
-  const { mentorScore, finalScore, passed, mentorScored, mentorScoreDetails, questionScores, typeScores } = req.body;
+  const { mentorScore, finalScore, passed, mentorScored, mentorScoreDetails, questionScores, typeScores, mentorComment } = req.body;
   let saved = null;
   await db.withLock('records.json', async () => {
     const records = await db.readJSONRaw('records.json');
@@ -1304,11 +1453,26 @@ app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
     if (mentorScoreDetails !== undefined) records[idx].mentorScoreDetails = mentorScoreDetails;
     if (questionScores !== undefined) records[idx].questionScores = questionScores;
     if (typeScores !== undefined) records[idx].typeScores = typeScores;
+    if (mentorComment !== undefined) records[idx].mentorComment = String(mentorComment).slice(0, 2000);
     await db.writeRaw('records.json', records);
     saved = records[idx];
   });
   if (!saved) return res.status(404).json({ error: '记录不存在' });
   res.json({ success: true, record: saved });
+});
+
+// ===== 管理端：安全/访问日志（导师/管理员可查，用于追溯爬虫与异常访问） =====
+app.get('/api/admin/security/logs', mentorAuth, async (req, res) => {
+  let arr = [];
+  try { const stored = await db.readJSONRaw(ACCESS_LOG_KEY); if (Array.isArray(stored)) arr = stored; } catch (e) {}
+  // 合并内存中尚未落盘的日志（最新在前）
+  const merged = [..._accessBuf, ...arr];
+  const q = req.query.q ? String(req.query.q).toLowerCase() : '';
+  const limit = Math.min(500, parseInt(req.query.limit, 10) || 200);
+  let rows = merged.slice().reverse(); // 最新在前
+  if (q) rows = rows.filter(r => (r.ip||'').includes(q) || (r.n||'').toLowerCase().includes(q) || (r.p||'').toLowerCase().includes(q) || (r.ua||'').toLowerCase().includes(q));
+  rows = rows.slice(0, limit).map(r => ({ ...r, time: new Date(r.t).toLocaleString('zh-CN') }));
+  res.json({ success: true, total: merged.length, filter: q || '', logs: rows });
 });
 
 app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
