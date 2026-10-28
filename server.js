@@ -485,13 +485,37 @@ const EXAM_CONFIGS = {
     { id: 'tr_viz',   title: '可视化系统',   panel: 'training', brand: '嗨动', duration: 40, questionFile: 'training/viz.js',   totalQuestions: 18, distribution: { single: 10, multiple: 4, judge: 2, short: 2 } },
   ],
   scene: [
-    // 场景化赋能专项 · 固定整卷（不抽题）。fixed=true 时 start-exam 走固定整卷逻辑。
-    { id: 'sceneA', title: '阶段测一 · 拆场景', panel: 'scene', stage: 1, duration: 40, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneA', passScore: 70, totalQuestions: 12, distribution: { single: 5, multiple: 3, judge: 2, short: 2 } },
-    { id: 'sceneB', title: '阶段测二 · 出方案', panel: 'scene', stage: 2, duration: 50, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneB', passScore: 70, totalQuestions: 11, distribution: { single: 4, multiple: 2, judge: 2, short: 3 } },
-    { id: 'sceneC', title: '阶段测三 · 讲方案', panel: 'scene', stage: 3, duration: 40, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneC', passScore: 70, totalQuestions: 10, distribution: { single: 3, multiple: 2, judge: 1, short: 4 } },
-    { id: 'sceneD', title: '结业综合卷', panel: 'scene', stage: 4, duration: 120, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneD', passScore: 75, totalQuestions: 21, distribution: { single: 12, multiple: 4, judge: 4, short: 1 } },
+    // 场景化赋能专项 · 5 场闯关式固定卷（不抽题）。fixed=true 时 start-exam 走固定整卷逻辑。
+    // 层层递进：集成全景 → 会议室 → 展厅 → 需求澄清与跨系统配单 → 结业综合。
+    // 每卷满分 100、统一通过线 80；客观题总分均低于 80，必须经导师完成主观题评分后才可能通过。
+    { id: 'sceneT1', title: '阶段测一 · 集成全景与产品地图', panel: 'scene', stage: 1, duration: 35, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneT1', passScore: 80, totalQuestions: 25 },
+    { id: 'sceneT2', title: '阶段测二 · 会议室拓扑与配单', panel: 'scene', stage: 2, duration: 45, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneT2', passScore: 80, totalQuestions: 29 },
+    { id: 'sceneT3', title: '阶段测三 · 展厅拓扑与配单', panel: 'scene', stage: 3, duration: 45, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneT3', passScore: 80, totalQuestions: 28 },
+    { id: 'sceneT4', title: '阶段测四 · 需求澄清与跨系统配单', panel: 'scene', stage: 4, duration: 55, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneT4', passScore: 80, totalQuestions: 24 },
+    { id: 'sceneFinal', title: '结业综合测试', panel: 'scene', stage: 5, duration: 70, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneFinal', passScore: 80, totalQuestions: 30 },
   ]
 };
+
+// ===== 场景化专项 · 闯关顺序与合格判定 =====
+// 闯关规则：按顺序考核，前一场「通过且主观题已由导师评分」后才解锁下一场。
+const SCENE_EXAM_SEQUENCE = ['sceneT1', 'sceneT2', 'sceneT3', 'sceneT4', 'sceneFinal'];
+
+// 取一组记录中最终得分最高的一条（finalScore 优先，其次 autoScore）
+function bestRecordOf(list) {
+  return (list || []).reduce((best, r) => {
+    const s = (r.finalScore !== undefined && r.finalScore !== null) ? r.finalScore : (r.autoScore || 0);
+    const bs = best ? ((best.finalScore !== undefined && best.finalScore !== null) ? best.finalScore : (best.autoScore || 0)) : -1;
+    return Number(s) > Number(bs) ? r : best;
+  }, null);
+}
+
+// 场景化单场「合格」：达到通过线，且（导师已评分 或 该卷无主观题）
+function sceneRecordQualified(r) {
+  if (!r || !r.passed) return false;
+  if (r.mentorScored) return true;
+  const qs = Array.isArray(r.questions) ? r.questions : [];
+  return !qs.some(q => q && q.manual);
+}
 
 // ===== Fisher-Yates 洗牌 =====
 async function getAllExams() {
@@ -1089,10 +1113,38 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
   const { examId } = req.body || {};
   if (!examId) return res.status(400).json({ error: '参数不完整' });
 
-  const exam = (await getAllExams()).find(e => e.id === examId);
+  const allExams = await getAllExams();
+  const exam = allExams.find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
 
   const records = await db.readJSON('records.json');
+
+  // ===== 场景化专项 · 闯关校验：上一场达到通过线并完成导师评分后，才允许开始本场 =====
+  if (exam.panel === 'scene') {
+    const seqIdx = SCENE_EXAM_SEQUENCE.indexOf(examId);
+    if (seqIdx > 0) {
+      const prevId = SCENE_EXAM_SEQUENCE[seqIdx - 1];
+      const prevRecords = records.filter(r => r.studentName === studentName && r.examId === prevId);
+      if (!prevRecords.some(sceneRecordQualified)) {
+        const prevExam = allExams.find(e => e.id === prevId);
+        const prevBest = bestRecordOf(prevRecords);
+        return res.json({
+          success: false,
+          locked: true,
+          message: `请先通过「${prevExam ? prevExam.title : prevId}」（通过线 ${prevExam ? prevExam.passScore : 80} 分，主观题需导师评分）后再进行本场考核`,
+          prevExam: prevId,
+          bestRecord: prevBest ? {
+            id: prevBest.id,
+            score: (prevBest.finalScore !== undefined && prevBest.finalScore !== null) ? prevBest.finalScore : prevBest.autoScore,
+            passed: !!prevBest.passed,
+            mentorScored: !!prevBest.mentorScored,
+            submitTime: prevBest.submitTime
+          } : null
+        });
+      }
+    }
+  }
+
   const attemptCount = records.filter(r => r.studentName === studentName && r.examId === examId).length;
   if (attemptCount >= MAX_ATTEMPTS) {
     const examRecords = records.filter(r => r.studentName === studentName && r.examId === examId);
@@ -1439,22 +1491,29 @@ app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
 });
 
 app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
-  const { mentorScore, finalScore, passed, mentorScored, mentorScoreDetails, questionScores, typeScores, mentorComment } = req.body;
+  const { mentorScore, finalScore, mentorScored, mentorScoreDetails, questionScores, typeScores, mentorComment } = req.body;
   let saved = null;
   await db.withLock('records.json', async () => {
     const records = await db.readJSONRaw('records.json');
     const idx = records.findIndex(r => r.id === req.params.id);
     if (idx < 0) return;
-    if (mentorScore !== undefined) records[idx].mentorScore = mentorScore;
-    if (finalScore !== undefined) records[idx].finalScore = finalScore;
-    if (passed !== undefined) records[idx].passed = passed;
-    if (mentorScored !== undefined) records[idx].mentorScored = mentorScored;
-    if (mentorScoreDetails !== undefined) records[idx].mentorScoreDetails = mentorScoreDetails;
-    if (questionScores !== undefined) records[idx].questionScores = questionScores;
-    if (typeScores !== undefined) records[idx].typeScores = typeScores;
-    if (mentorComment !== undefined) records[idx].mentorComment = String(mentorComment).slice(0, 2000);
+    const target = records[idx];
+    if (mentorScore !== undefined) target.mentorScore = mentorScore;
+    if (finalScore !== undefined) target.finalScore = finalScore;
+    if (mentorScored !== undefined) target.mentorScored = !!mentorScored;
+    if (mentorScoreDetails !== undefined) target.mentorScoreDetails = mentorScoreDetails;
+    if (questionScores !== undefined) target.questionScores = questionScores;
+    if (typeScores !== undefined) target.typeScores = typeScores;
+    if (mentorComment !== undefined) target.mentorComment = String(mentorComment).slice(0, 2000);
+    // 通过线由服务端按该场考试配置判定（场景化固定卷为 80 分），不信任客户端传入的 passed
+    const examCfg = (await getAllExams()).find(e => e.id === target.examId);
+    const line = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
+    const score = (target.finalScore !== undefined && target.finalScore !== null) ? target.finalScore : (target.autoScore || 0);
+    target.passScore = line;
+    target.passed = Number(score) >= line;
+    if (target.panel === 'scene') target.mentorPending = !target.mentorScored;
     await db.writeRaw('records.json', records);
-    saved = records[idx];
+    saved = target;
   });
   if (!saved) return res.status(404).json({ error: '记录不存在' });
   res.json({ success: true, record: saved });
@@ -1491,6 +1550,7 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
       records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
     }
     records[idx].mentorScored = false;
+    records[idx].mentorPending = (records[idx].panel === 'scene');
     records[idx].mentorScoreDetails = null;
     await db.writeRaw('records.json', records);
     saved = records[idx];
@@ -1571,6 +1631,57 @@ async function getSceneProgress() {
   return p;
 }
 
+// ===== 学员端：场景化闯关状态（解锁 / 待评分 / 已通过） =====
+app.get('/api/scene/status', authMiddleware, async (req, res) => {
+  try {
+    const studentName = req.currentUser ? req.currentUser.name : '';
+    if (!studentName) return res.status(401).json({ error: '未登录' });
+    const records = await db.readJSON('records.json');
+    const mine = records.filter(r => r.studentName === studentName && SCENE_EXAM_SEQUENCE.includes(r.examId));
+
+    const exams = [];
+    let prevQualified = true;
+    for (const cfg of EXAM_CONFIGS.scene) {
+      const rs = mine.filter(r => r.examId === cfg.id);
+      const best = bestRecordOf(rs);
+      const qualified = rs.some(sceneRecordQualified);
+      const pending = !qualified && rs.some(r => r.mentorPending || (r.passed && !r.mentorScored));
+      const unlocked = prevQualified;
+      let status = 'unstarted';
+      if (qualified) status = 'passed';
+      else if (!unlocked) status = 'locked';
+      else if (pending) status = 'pending';
+      else if (rs.length > 0) status = 'failed';
+      exams.push({
+        id: cfg.id,
+        title: cfg.title,
+        stage: cfg.stage,
+        duration: cfg.duration,
+        passScore: cfg.passScore,
+        totalQuestions: cfg.totalQuestions,
+        unlocked,
+        qualified,
+        pending,
+        status,
+        attempts: rs.length,
+        bestScore: best ? ((best.finalScore !== undefined && best.finalScore !== null) ? best.finalScore : (best.autoScore || 0)) : null,
+        lastRecordId: best ? best.id : null
+      });
+      prevQualified = qualified;
+    }
+    res.json({
+      success: true,
+      studentName,
+      passScore: 80,
+      exams,
+      allPassed: exams.every(e => e.qualified)
+    });
+  } catch (e) {
+    console.error('[scene/status] error:', e.message);
+    res.status(500).json({ error: '获取闯关状态失败：' + e.message });
+  }
+});
+
 app.get('/api/scene/overview', mentorAuth, async (req, res) => {
   try {
     const cfg = (await getModuleConfig());
@@ -1593,12 +1704,12 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
       return { username: u, name: uu ? uu.name : u };
     });
 
-    // 按纳入学员聚合四场成绩（取每人每场最高 finalScore）
-    const recordKeys = ['sceneA', 'sceneB', 'sceneC', 'sceneD'];
-    const scoreMap = {}; // username -> { sceneA:{score,passed,count}, ... }
+    // 按纳入学员聚合五场成绩（取每人每场最高 finalScore）
+    const recordKeys = SCENE_EXAM_SEQUENCE;
+    const scoreMap = {}; // username -> { sceneT1:{score,passed,count}, ... }
     for (const u of progress.students) {
       const uname = (users[u] && users[u].name) || u;
-      scoreMap[u] = { uname, exams: {} };
+      scoreMap[u] = { uname, exams: {}, qualified: {} };
     }
     for (const r of records) {
       if ((r.panel || '') !== 'scene') continue;
@@ -1609,6 +1720,8 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
       if (!matchedUser) continue;
       const holder = scoreMap[matchedUser];
       const score = r.finalScore !== undefined ? r.finalScore : (r.autoScore !== undefined ? r.autoScore : 0);
+      // 单场合格：达到通过线 + 主观题已完成导师评分
+      if (sceneRecordQualified(r)) holder.qualified[r.examId] = true;
       if (!holder.exams[r.examId] || score > holder.exams[r.examId].score) {
         holder.exams[r.examId] = { score, passed: !!r.passed, count: (holder.exams[r.examId] ? holder.exams[r.examId].count : 0) + 1, id: r.id };
       } else if (holder.exams[r.examId]) {
@@ -1616,15 +1729,15 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
       }
     }
 
-    // 成绩汇总
-    const examPasses = { sceneA: 70, sceneB: 70, sceneC: 70, sceneD: 75 };
+    // 成绩汇总（五场统一通过线 80 分）
+    const examPasses = { sceneT1: 80, sceneT2: 80, sceneT3: 80, sceneT4: 80, sceneFinal: 80 };
     const scoreRows = progress.students.map(u => {
       const holder = scoreMap[u];
       const exams = {};
       let valid = 0, sum = 0;
       for (const k of recordKeys) {
         const e = holder.exams[k];
-        exams[k] = e ? { score: e.score, passed: e.passed, count: e.count, id: e.id } : null;
+        exams[k] = e ? { score: e.score, passed: e.passed, qualified: !!holder.qualified[k], count: e.count, id: e.id } : null;
         if (e) { valid++; sum += e.score; }
       }
       const avg = valid > 0 ? Math.round((sum / valid) * 10) / 10 : null;
@@ -1634,8 +1747,8 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
         if (!exams[k]) continue;
         if (!weakest || exams[k].score < weakest.score) weakest = { key: k, score: exams[k].score, pass: examPasses[k], title: k };
       }
-      const allPassed = recordKeys.every(k => exams[k] && exams[k].passed);
-      return { username: u, name: holder.uname, exams, avg, weakest: weakest ? { ...weakest, title: { sceneA: '阶段测一', sceneB: '阶段测二', sceneC: '阶段测三', sceneD: '结业卷' }[weakest.key] || weakest.key } : null, allPassed };
+      const allPassed = recordKeys.every(k => exams[k] && exams[k].qualified);
+      return { username: u, name: holder.uname, exams, avg, weakest: weakest ? { ...weakest, title: { sceneT1: '阶段测一', sceneT2: '阶段测二', sceneT3: '阶段测三', sceneT4: '阶段测四', sceneFinal: '结业综合' }[weakest.key] || weakest.key } : null, allPassed };
     });
 
     res.json({

@@ -6,11 +6,18 @@ const API_BASE = window.location.origin;
 const PASSING_SCORE = 90;
 const MAX_ATTEMPTS = 10;
 const REMINDER_TEXT = '考核只是以练代训，请独立完成、真实作答，不要使用AI或他人代答哦，我可是在盯着你呢～';
-// 分数分级：<80红 / 80-89黄 / 90+绿
-function getScoreTag(score){
-  if (score >= PASSING_SCORE) return { label:'非常优秀', cls:'badge-success', color:'var(--success)', level:3 };
-  if (score >= 80) return { label:'再努把力', cls:'badge-warning', color:'var(--warning)', level:2 };
+// 分数分级：低于通过线 10 分内黄 / 通过线以上绿（默认通过线 90）
+function getScoreTag(score, passLine){
+  const line = (typeof passLine === 'number' && passLine > 0) ? passLine : PASSING_SCORE;
+  if (score >= line) return { label:'非常优秀', cls:'badge-success', color:'var(--success)', level:3 };
+  if (score >= line - 10) return { label:'再努把力', cls:'badge-warning', color:'var(--warning)', level:2 };
   return { label:'仍需努力', cls:'badge-danger', color:'var(--danger)', level:1 };
+}
+// 取记录自身的通过线（场景化卷为 80 分），无则回落全局通过线
+function passLineOf(r){
+  if (!r) return undefined;
+  if (typeof r.passScore === 'number' && r.passScore > 0) return r.passScore;
+  return r.panel === 'scene' ? 80 : undefined;
 }
 function reminderBanner(compact){
   return `<div style="background:linear-gradient(90deg,#fef3c7,#fde68a);border:1px solid #f59e0b;color:#92400e;border-radius:10px;padding:${compact?'7px 14px':'11px 16px'};font-size:${compact?'12px':'13px'};font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;line-height:1.5">
@@ -28,9 +35,9 @@ const PANEL_DESCS = {
   sales:'按产品系列考核，侧重方案搭配、选型推荐和场景应用能力',
   client:'客户现场培训考核，按产品系列出题，模拟纸质试卷模式',
   new_product:'新品培训考核，持续更新中',
-  scene:'音视频集成场景化赋能：8周任务卡 + 4场固定卷考核 + 结业答辩，独立通过线'
+  scene:'音视频集成场景化赋能：8周任务卡 + 5场闯关式考核 + 结业答辩，独立通过线'
 };
-const SCENE_EXAM_LABELS = { sceneA:'阶段测一 · 拆场景', sceneB:'阶段测二 · 出方案', sceneC:'阶段测三 · 讲方案', sceneD:'结业综合卷' };
+const SCENE_EXAM_LABELS = { sceneT1:'阶段测一 · 集成全景与产品地图', sceneT2:'阶段测二 · 会议室拓扑与配单', sceneT3:'阶段测三 · 展厅拓扑与配单', sceneT4:'阶段测四 · 需求澄清与跨系统配单', sceneFinal:'结业综合测试' };
 const TYPE_LABELS = { single:'单选题', multiple:'多选题', judge:'判断题', short:'简答题' };
 
 // ===== 状态 =====
@@ -210,6 +217,7 @@ async function executeQrTarget(){
       // 找到对应考试
       const targetExam = state.exams.find(e => e.id === exam);
       if (targetExam && !targetExam._blocked) {
+        render(); // 先渲染板块页，避免开始考试被锁定时停留在旧页面
         setTimeout(() => startExam(exam), 300);
         return;
       }
@@ -527,8 +535,8 @@ function renderPanelCard(panel){
       <div class="panel-desc">${PANEL_DESCS[panel]||''}</div>
       ${panel === 'scene' ? `
       <div class="panel-meta">
-        <span class="badge badge-scene">4套固定卷</span>
-        <span class="badge badge-scene">通过线70/75</span>
+        <span class="badge badge-scene">5套闯关卷</span>
+        <span class="badge badge-scene">通过线80</span>
         <span class="badge badge-scene">14张任务卡</span>
       </div>` : `
       <div class="panel-meta">
@@ -674,16 +682,33 @@ function renderExamList(exams){
   const isScene = panel === 'scene';
   return `<div class="exam-list">${exams.map(e => {
     const qrUrl = `${baseUrl}?panel=${panel}&exam=${e.id}`;
+    const locked = !!e._locked;
+    const blocked = !!e._blocked;
+    const disabled = locked || blocked;
+    let badge;
+    if (locked) badge = '<span class="badge badge-danger">🔒 未解锁</span>';
+    else if (blocked) badge = '<span class="badge badge-danger">已达上限</span>';
+    else if (isScene && e._status === 'passed') badge = '<span class="badge badge-success">✓ 已通过</span>';
+    else if (isScene && e._status === 'pending') badge = '<span class="badge badge-warning">待导师评分</span>';
+    else if (isScene && e._status === 'failed') badge = '<span class="badge badge-danger">未通过</span>';
+    else badge = '<span class="badge badge-success">可答题</span>';
+
+    const parts = [`${e.totalQuestions}题`, `${e.duration}分钟`];
+    if (isScene) parts.push(`通过${e.passScore || 80}分`);
+    if (isScene && e._bestScore !== null && e._bestScore !== undefined) parts.push(`最佳${e._bestScore}分`);
+    parts.push(e._attempts > 0 ? `已答${e._attempts}次` : '未答');
+    if (locked) parts.push('需先通过上一场');
+
     return `
-    <div class="exam-item${e._blocked ? ' blocked' : ''}" data-exam-id="${e.id}">
+    <div class="exam-item${disabled ? ' blocked' : ''}" data-exam-id="${e.id}">
       <div class="exam-item-info">
-        <div class="exam-item-title">${escapeHtml(e.title)}</div>
-        <div class="exam-item-desc">${e.totalQuestions}题 · ${e.duration}分钟${isScene ? ` · 通过${e.passScore || 70}分` : ''} · ${e._blocked ? '已达上限' : (e._attempts > 0 ? `已答${e._attempts}次` : '未答')}</div>
+        <div class="exam-item-title">${escapeHtml(e.title)}${locked ? ' 🔒' : ''}</div>
+        <div class="exam-item-desc">${parts.join(' · ')}</div>
       </div>
       <div class="exam-item-meta">
         <button class="qr-btn qr-btn-sm" onclick="event.stopPropagation();APP.showQRModal('${escapeHtml(e.title)}','${qrUrl}','扫码直接进入考试「${escapeHtml(e.title)}」')" title="扫码进入此考试">📱</button>
-        ${e._blocked ? '<span class="badge badge-danger">已达上限</span>' : '<span class="badge badge-success">可答题</span>'}
-        <span style="font-size:20px">→</span>
+        ${badge}
+        <span style="font-size:20px">${locked ? '🔒' : '→'}</span>
       </div>
     </div>`;}).join('')}</div>`;
 }
@@ -699,6 +724,9 @@ async function startExam(examId){
     if (res.blocked){
       showToast(`该考试已达最大尝试次数（${MAX_ATTEMPTS}次）`,'warning');
       if (res.bestRecord) showToast(`历史最佳成绩：${res.bestRecord.score}分`,'info');
+    } else if (res.locked){
+      showToast(res.message || '请先通过上一场考核','warning');
+      if (res.bestRecord) showToast(`上一场最佳成绩：${res.bestRecord.score}分${res.bestRecord.passed ? (res.bestRecord.mentorScored ? '（已通过）' : '（待导师评分）') : ''}`,'info');
     } else {
       showToast(res.message || '开始考试失败','error');
     }
@@ -926,10 +954,21 @@ function renderResult(app){
   if (!record) { render(); return; }
 
   const score = record.finalScore !== undefined ? record.finalScore : record.autoScore;
-  const passed = record.passed;
+  const passLine = (exam && exam.passScore) ? exam.passScore : PASSING_SCORE;
+  const isScene = !!(exam && exam.panel === 'scene');
+  const pendingMentor = isScene && !!record.mentorPending && !record.mentorScored;
   const typeScores = record.typeScores || {};
-  const tag = getScoreTag(score);
-  const resultText = score >= PASSING_SCORE ? '🎉 非常优秀，恭喜通过！' : (score >= 80 ? '💪 再努把力就通过了！' : '📖 仍需继续努力，加油！');
+  const tag = getScoreTag(score, passLine);
+  let resultText;
+  if (pendingMentor){
+    resultText = `📝 客观题已判分，主观题等待导师评分后判定（通过线 ${passLine} 分）`;
+  } else if (record.passed){
+    resultText = '🎉 恭喜通过！';
+  } else if (score >= passLine - 10){
+    resultText = `💪 还差 ${Math.max(0, passLine - score)} 分，再努把力！`;
+  } else {
+    resultText = '📖 仍需继续努力，加油！';
+  }
 
   app.innerHTML = `
     <div class="header">
@@ -946,6 +985,7 @@ function renderResult(app){
         <div style="margin-top:8px"><span class="badge ${tag.cls}" style="font-size:14px;padding:5px 14px">${tag.label}</span></div>
         <div class="score-status" style="color:${tag.color}">${resultText}</div>
         <div style="font-size:13px;color:var(--text-sec);margin-top:4px">第${record.attemptNumber}次答题 · 剩余${state.remainingAttempts}次机会</div>
+        ${isScene ? `<div style="font-size:12px;color:var(--text-sec);margin-top:6px">${pendingMentor ? '导师评分完成后自动更新；通过后解锁下一场。' : (record.passed ? '本场已通过，可返回列表继续下一场。' : '未达通过线，可重新作答本场。')}</div>` : ''}
       </div>
       <div class="score-breakdown">
         ${['single','multiple','judge','short'].map(t => `
@@ -1106,7 +1146,7 @@ async function viewMyRecords(){
                   <strong style="margin-left:8px">${escapeHtml(r.examTitle || r.examId)}</strong>
                 </div>
                 <div>
-                  ${(() => { const t = getScoreTag(score); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
+                  ${(() => { const t = getScoreTag(score, passLineOf(r)); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
                   <span class="badge ${t.cls}" style="margin-left:8px">${t.label}</span>
                   <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${r.passed ? '✅通过' : '❌未通过'}</span>`; })()}
                   ${r.mentorScored ? '<span class="badge badge-success" style="margin-left:4px">已评</span>' : ''}
@@ -1152,7 +1192,7 @@ function showRecordDetailModal(record){
       <div class="modal-body" style="max-height:70vh;overflow-y:auto">
         <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
           <div class="stat-card"><div class="stat-value">${score}</div><div class="stat-label">最终得分</div></div>
-          <div class="stat-card"><div class="stat-value" style="font-size:16px;line-height:1.2;padding-top:10px"><span class="badge ${getScoreTag(score).cls}" style="font-size:13px">${getScoreTag(score).label}</span></div><div class="stat-label">等级</div></div>
+          <div class="stat-card"><div class="stat-value" style="font-size:16px;line-height:1.2;padding-top:10px"><span class="badge ${getScoreTag(score, passLineOf(record)).cls}" style="font-size:13px">${getScoreTag(score, passLineOf(record)).label}</span></div><div class="stat-label">等级</div></div>
           <div class="stat-card"><div class="stat-value">${record.autoScore||0}</div><div class="stat-label">自动评分</div></div>
           <div class="stat-card"><div class="stat-value">${record.mentorScored ? '✅' : '❌'}</div><div class="stat-label">是否已评</div></div>
         </div>
@@ -1459,7 +1499,7 @@ function renderMentorRecords(){
           <td><span class="badge badge-${PANEL_COLORS[panel]||'newbie'}">${PANEL_LABELS[panel]||'新人'}</span></td>
           <td>${escapeHtml(r.examTitle || r.examId)}</td>
           <td><strong>${score}</strong></td>
-          <td>${(() => { const t = getScoreTag(score); return `<span class="badge ${t.cls}">${t.label}</span>`; })()}</td>
+          <td>${(() => { const t = getScoreTag(score, passLineOf(r)); return `<span class="badge ${t.cls}">${t.label}</span>`; })()}</td>
           <td style="font-size:12px">${new Date(r.submitTime).toLocaleString('zh-CN')}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
@@ -1574,7 +1614,7 @@ function renderMentorScoringSub(filter){
           <td>${aiCell}</td>
           <td>${autoScore}</td>
           <td>${mentorScore}</td>
-          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore).cls}">${getScoreTag(finalScore).label}</span> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
+          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore, passLineOf(r)).cls}">${getScoreTag(finalScore, passLineOf(r)).label}</span> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
             <button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">评分</button>
@@ -2180,11 +2220,13 @@ async function saveMentorScore(recordId){
   const commentEl = document.getElementById(`mentorComment_${recordId}`);
   const mentorComment = commentEl ? commentEl.value.trim() : (record.mentorComment || '');
 
+  // 通过线按该场考试自身配置判定（场景化固定卷为 80 分），服务端也会按同一口径重算
+  const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (record.panel === 'scene' ? 80 : PASSING_SCORE);
   try {
     const res = await api(`/api/mentor/records/${recordId}/score`, {
       method:'PUT', body:JSON.stringify({
         mentorScore: shortScore, finalScore: totalScore,
-        passed: totalScore >= PASSING_SCORE, mentorScored: true,
+        passed: totalScore >= passLine, mentorScored: true,
         mentorScoreDetails, questionScores: newQuestionScores, typeScores: newTypeScores,
         mentorComment
       })
@@ -3294,6 +3336,21 @@ async function renderScenePanel(app){
   const exams = state.exams || [];
   const baseUrl = getBaseUrl();
 
+  // 学员端：拉取闯关状态，注入「未解锁 / 待评分 / 已通过」
+  let sceneStatus = null;
+  if (!isManager){
+    try{
+      const r = await api('/api/scene/status');
+      if (r && r.success) sceneStatus = r;
+    }catch(e){ console.error('scene status:', e); }
+  }
+  const statusMap = {};
+  if (sceneStatus) for (const s of (sceneStatus.exams || [])) statusMap[s.id] = s;
+  const examsView = exams.map(e => {
+    const s = statusMap[e.id];
+    return s ? { ...e, _locked: !s.unlocked, _status: s.status, _qualified: s.qualified, _pending: s.pending, _bestScore: s.bestScore } : e;
+  });
+
   let ov = null;
   if(isManager){
     try{
@@ -3335,20 +3392,23 @@ async function renderScenePanel(app){
       ${sceneScoreTable(ov)}
     `;
   } else if(!isManager){
+    const passedCount = sceneStatus ? sceneStatus.exams.filter(e => e.qualified).length : 0;
     body += `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#64748b">
-      本专项为场景化培训考核：完成下方 <b>4 场固定卷</b> 在线考核（阶段测一 / 二 / 三 + 结业综合卷）。
-      你的推进进度与结业答辩由导师在「推进区」跟踪记录。每卷独立通过线，最高可答 ${MAX_ATTEMPTS} 次。
+      本专项为场景化培训考核：按顺序完成 <b>5 场闯关式固定卷</b>（阶段测一 → 二 → 三 → 四 → 结业综合）。
+      每场满分 100、统一通过线 <b>80 分</b>；客观题提交后需导师完成主观题评分才算通过，
+      <b>上一场通过后才解锁下一场</b>。每卷最高可答 ${MAX_ATTEMPTS} 次。
+      ${sceneStatus ? `<div style="margin-top:6px;color:#2563eb;font-weight:700">当前闯关进度：${passedCount} / 5</div>` : ''}
     </div>`;
   }
 
-  body += `<div class="week-section"><div class="week-title">📝 四场固定卷考核</div>${renderExamList(exams)}</div>`;
+  body += `<div class="week-section"><div class="week-title">📝 五场闯关式考核（按顺序解锁）</div>${renderExamList(examsView)}</div>`;
 
   if(isManager && !ov){
     body += `<div style="color:var(--danger);font-size:13px;margin-top:8px">⚠️ 专项数据加载失败，仅展示考试列表。</div>`;
   }
 
   const footer = `<div style="text-align:center;margin-top:20px;color:var(--text-sec);font-size:13px">
-    每套固定卷最多 ${MAX_ATTEMPTS} 次尝试机会 · 阶段测一/二/三通过线 70 分 · 结业综合卷通过线 75 分
+    每套闯关卷最多 ${MAX_ATTEMPTS} 次尝试机会 · 五场统一通过线 80 分 · 主观题需导师评分，通过后解锁下一场
   </div>`;
 
   app.innerHTML = header + `<div class="container">${reminderBanner(false)}${body}${footer}</div>`;
@@ -3391,19 +3451,21 @@ function sceneWeekGroup(tasks, canEdit){
   return out;
 }
 function sceneScoreTable(ov){
+  const sceneKeys = ['sceneT1','sceneT2','sceneT3','sceneT4','sceneFinal'];
   if(!ov.students.length){
     return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:18px;text-align:center;color:#9ca3af;font-size:13px;margin-bottom:18px">
-      尚未纳入学员。点击「👥 纳入 / 移除学员」把学员纳入本专项，纳入后在下方展示四场成绩与整体通过情况。
+      尚未纳入学员。点击「👥 纳入 / 移除学员」把学员纳入本专项，纳入后在下方展示五场成绩与整体通过情况。
     </div>`;
   }
   let rows = '';
   for(const row of ov.scoreRows){
     let cells = '';
-    for(const k of ['sceneA','sceneB','sceneC','sceneD']){
+    for(const k of sceneKeys){
       const e = row.exams[k];
       if(e){
-        const col = e.passed ? '#16a34a' : (e.score >= 60 ? '#f59e0b' : '#dc2626');
-        cells += `<td style="padding:8px;text-align:center;color:${col};font-weight:600;">${e.score}${e.passed ? ' ✓' : ''}</td>`;
+        const done = !!e.qualified;
+        const col = done ? '#16a34a' : (e.score >= 70 ? '#f59e0b' : '#dc2626');
+        cells += `<td style="padding:8px;text-align:center;color:${col};font-weight:600;">${e.score}${done ? ' ✓' : (e.passed ? ' 待评' : '')}</td>`;
       } else {
         cells += `<td style="padding:8px;text-align:center;color:#cbd5e1;">—</td>`;
       }
@@ -3417,14 +3479,15 @@ function sceneScoreTable(ov){
     </tr>`;
   }
   return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:18px;overflow-x:auto">
-    <div style="font-size:14px;font-weight:700;color:#1f2937;margin-bottom:10px;">📊 纳入学员 · 四场成绩（通过线：阶段测 70 / 结业 75）</div>
+    <div style="font-size:14px;font-weight:700;color:#1f2937;margin-bottom:10px;">📊 纳入学员 · 五场闯关成绩（统一通过线 80 分，含导师评分）</div>
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="background:#f8fafc;color:#6b7280;">
         <th style="padding:8px 12px;text-align:left;">学员</th>
         <th style="padding:8px;text-align:center;">阶段测一</th>
         <th style="padding:8px;text-align:center;">阶段测二</th>
         <th style="padding:8px;text-align:center;">阶段测三</th>
-        <th style="padding:8px;text-align:center;">结业卷</th>
+        <th style="padding:8px;text-align:center;">阶段测四</th>
+        <th style="padding:8px;text-align:center;">结业综合</th>
         <th style="padding:8px;text-align:center;">平均</th>
         <th style="padding:8px;text-align:center;">最弱科目</th>
         <th style="padding:8px;text-align:center;">整体</th>
