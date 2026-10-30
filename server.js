@@ -1308,8 +1308,10 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
     recordSafe.submitTime = recordSafe.submitTime || new Date().toISOString();
     recordSafe.autoScore = autoScore;
     recordSafe.finalScore = autoScore;
-    // 固定整卷按该卷通过线判定；其余沿用全局通过线
+    // 板块归属以服务端考试配置为准，不信任客户端传入的 panel
     const examCfg = (await getAllExams()).find(e => e.id === recordSafe.examId);
+    recordSafe.panel = examCfg ? examCfg.panel : (recordSafe.panel || 'newbie');
+    // 固定整卷按该卷通过线判定；其余沿用全局通过线
     const passLine = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
     recordSafe.passScore = passLine;
     recordSafe.passed = autoScore >= passLine;
@@ -1361,13 +1363,15 @@ app.get('/api/mentor/records', mentorAuth, async (req, res) => {
   if (req.currentUser.role !== 'admin') {
     const mentors = await db.readObj('mentors.json');
     const assigned = mentors[req.currentUser.username] || [];
+    const users = await db.readObj('users.json');
     const assignedNames = new Set();
     for (const s of assigned) {
-      const users = await db.readObj('users.json');
       const u = users[s];
       if (u) assignedNames.add(u.name);
     }
-    filtered = filtered.filter(r => assignedNames.has(r.studentName));
+    // 场景化专项为独立培养计划（名单在 scene_progress.json 维护，且总览对全体导师可见），
+    // 其记录不受 mentors.json 分配限制，否则导师在「评分管理」看不到场景卷、无法二次评分
+    filtered = filtered.filter(r => assignedNames.has(r.studentName) || r.panel === 'scene');
   }
   
   // 考试标题映射（供按「考试名称」筛选 + 展示，考试ID/标题均可命中）
@@ -1411,7 +1415,8 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
     const assigned = mentors[req.currentUser.username] || [];
     const users = await db.readObj('users.json');
     const assignedNames = new Set(assigned.map(s => { const u = users[s]; return u ? u.name : s; }));
-    filtered = filtered.filter(r => assignedNames.has(r.studentName));
+    // 场景化专项记录不受分配限制，导出时一并包含
+    filtered = filtered.filter(r => assignedNames.has(r.studentName) || r.panel === 'scene');
   }
   
   const exams = await getAllExams();
@@ -1704,24 +1709,36 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
       return { username: u, name: uu ? uu.name : u };
     });
 
+    // 已实际参加场景考核但未纳入名单的学员也补进成绩表，避免导师看不到已发生的考试记录
+    const nameToUsername = {};
+    for (const [un, uu] of Object.entries(users)) nameToUsername[uu.name || un] = un;
+    const scoreUsernames = progress.students.slice();
+    for (const r of records) {
+      if ((r.panel || '') !== 'scene' || !SCENE_EXAM_SEQUENCE.includes(r.examId)) continue;
+      const un = nameToUsername[r.studentName];
+      if (un && !scoreUsernames.includes(un)) scoreUsernames.push(un);
+    }
+
     // 按纳入学员聚合五场成绩（取每人每场最高 finalScore）
     const recordKeys = SCENE_EXAM_SEQUENCE;
     const scoreMap = {}; // username -> { sceneT1:{score,passed,count}, ... }
-    for (const u of progress.students) {
+    for (const u of scoreUsernames) {
       const uname = (users[u] && users[u].name) || u;
-      scoreMap[u] = { uname, exams: {}, qualified: {} };
+      scoreMap[u] = { uname, exams: {}, qualified: {}, pending: {} };
     }
     for (const r of records) {
       if ((r.panel || '') !== 'scene') continue;
       if (!recordKeys.includes(r.examId)) continue;
       const uname = r.studentName;
-      // 通过学员名字匹配到纳入用户（可能存在同名，按姓名匹配取一个）
-      const matchedUser = progress.students.find(u => (users[u] && users[u].name) === uname);
-      if (!matchedUser) continue;
+      // 通过学员名字匹配到用户（可能存在同名，按姓名匹配取一个）
+      const matchedUser = scoreUsernames.find(u => (users[u] && users[u].name) === uname) || nameToUsername[uname];
+      if (!matchedUser || !scoreMap[matchedUser]) continue;
       const holder = scoreMap[matchedUser];
       const score = r.finalScore !== undefined ? r.finalScore : (r.autoScore !== undefined ? r.autoScore : 0);
       // 单场合格：达到通过线 + 主观题已完成导师评分
       if (sceneRecordQualified(r)) holder.qualified[r.examId] = true;
+      // 已交卷但主观题尚未评分 → 标记待评，导师端可直观看到
+      if (!r.mentorScored && Array.isArray(r.questions) && r.questions.some(q => q && q.manual)) holder.pending[r.examId] = true;
       if (!holder.exams[r.examId] || score > holder.exams[r.examId].score) {
         holder.exams[r.examId] = { score, passed: !!r.passed, count: (holder.exams[r.examId] ? holder.exams[r.examId].count : 0) + 1, id: r.id };
       } else if (holder.exams[r.examId]) {
@@ -1731,13 +1748,13 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
 
     // 成绩汇总（五场统一通过线 80 分）
     const examPasses = { sceneT1: 80, sceneT2: 80, sceneT3: 80, sceneT4: 80, sceneFinal: 80 };
-    const scoreRows = progress.students.map(u => {
+    const scoreRows = scoreUsernames.map(u => {
       const holder = scoreMap[u];
       const exams = {};
       let valid = 0, sum = 0;
       for (const k of recordKeys) {
         const e = holder.exams[k];
-        exams[k] = e ? { score: e.score, passed: e.passed, qualified: !!holder.qualified[k], count: e.count, id: e.id } : null;
+        exams[k] = e ? { score: e.score, passed: e.passed, qualified: !!holder.qualified[k], pending: !!holder.pending[k], count: e.count, id: e.id } : null;
         if (e) { valid++; sum += e.score; }
       }
       const avg = valid > 0 ? Math.round((sum / valid) * 10) / 10 : null;
@@ -2380,7 +2397,10 @@ app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
     const questions = r.questions || [];
     const answers = r.answers || {};
     const qScores = r.questionScores || {};
+    // 未完成导师评分的主观题不计入「错题/薄弱点」，避免把待评分误判为答错
+    const pendingManual = !r.mentorScored && questions.some(q => q && q.manual);
     for (const q of questions) {
+      if (pendingManual && q.manual) continue;
       se.totalQuestions++;
       const qs = qScores[q.id] || {};
       const gotScore = qs.score !== undefined ? qs.score : 0;
@@ -2424,7 +2444,10 @@ app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
     const questions = r.questions || [];
     const answers = r.answers || {};
     const qScores = r.questionScores || {};
+    // 未完成导师评分的主观题不计入错题，避免待评分记录被统计为薄弱点
+    const pendingManual = !r.mentorScored && questions.some(q => q && q.manual);
     for (const q of questions) {
+      if (pendingManual && q.manual) continue;
       const qs = qScores[q.id] || {};
       const gotScore = qs.score !== undefined ? qs.score : 0;
       const maxScore = qs.maxScore || q.points || 5;

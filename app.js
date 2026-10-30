@@ -1024,7 +1024,8 @@ function goHome(){
 
 // ===== 模块辅助函数 =====
 function getAllModuleIds(){
-  const ids = ['newbie', 'training', 'tech', 'sales', 'client'];
+  // scene 为固定整卷模块（无 bankIds），但需参与导师记录/评分/看板统计
+  const ids = ['newbie', 'training', 'tech', 'sales', 'client', 'scene'];
   for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
     if (ids.includes(id)) continue;
     if ((mod.bankIds || []).length > 0) ids.push(id);
@@ -1148,7 +1149,7 @@ async function viewMyRecords(){
                 <div>
                   ${(() => { const t = getScoreTag(score, passLineOf(r)); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
                   <span class="badge ${t.cls}" style="margin-left:8px">${t.label}</span>
-                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${r.passed ? '✅通过' : '❌未通过'}</span>`; })()}
+                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${(!r.mentorScored && (r.questions||[]).some(q => q.manual)) ? '⏳待导师评分' : (r.passed ? '✅通过' : '❌未通过')}</span>`; })()}
                   ${r.mentorScored ? '<span class="badge badge-success" style="margin-left:4px">已评</span>' : ''}
                 </div>
               </div>
@@ -1209,7 +1210,9 @@ function showRecordDetailModal(record){
               ${q.answer ? `<span style="margin-left:8px;color:var(--text-sec)">正确答案：</span>${escapeHtml(q.answer)}` : ''}
             </div>
             <div style="font-size:12px;margin-top:2px">
-              <span class="${isCorrect ? 'answer-correct' : 'answer-wrong'}">得分：${gotScore}/${maxScore}</span>
+              ${(q.manual && !record.mentorScored)
+                ? `<span style="color:var(--warning);font-weight:600">⏳ 主观题待导师评分（满分 ${maxScore} 分）</span>`
+                : `<span class="${isCorrect ? 'answer-correct' : 'answer-wrong'}">得分：${gotScore}/${maxScore}</span>`}
             </div>
           </div>`;
         }).join('')}
@@ -1262,12 +1265,13 @@ function renderMentor(app){
         <div class="nav-back" onclick="APP.goHome()">← 返回首页</div>
         <span style="font-size:14px;font-weight:600">${state.currentUser.role==='admin'?'管理员':'导师'}面板</span>
         <span style="font-size:13px;opacity:.9">${escapeHtml(state.currentUser.name)}</span>
-      </div>
+    </div>
     </div>
     <div class="container">
       <div class="tabs">
         ${tabs.map(t => `<span class="tab${state.mentorTab===t?' active':''}" onclick="APP.switchMentorTab('${t}')">${tabLabels[t]}</span>`).join('')}
         ${extraTabs.map(t => `<span class="tab${state.mentorTab===t?' active':''}" onclick="APP.switchMentorTab('${t}')">${extraLabels[t]}</span>`).join('')}
+        <span style="margin-left:auto;padding:11px 8px"><button class="btn btn-sm btn-outline" onclick="APP.refreshMentorData()" title="重新拉取最新答题记录与评分">🔄 刷新</button></span>
       </div>
       <div id="mentorContent"></div>
     </div>`;
@@ -1287,6 +1291,12 @@ function renderMentor(app){
 function switchMentorTab(tab){
   state.mentorTab = tab;
   render();
+}
+
+async function refreshMentorData(){
+  await syncAllRecords();
+  render();
+  showToast('数据已刷新','success');
 }
 
 // ===== 学员管理（导师自主分配学员） =====
@@ -1503,6 +1513,7 @@ function renderMentorRecords(){
           <td style="font-size:12px">${new Date(r.submitTime).toLocaleString('zh-CN')}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
+            ${needsMentorScoring(r) ? `<button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">${r.mentorScored ? '改分' : '评分'}</button>` : ''}
             <button class="btn btn-sm btn-danger" onclick="APP.deleteRecord('${r.id}')">删除</button>
           </td>
         </tr>`;
@@ -1551,10 +1562,17 @@ function exportRecords(){
 }
 
 // ===== 评分管理 =====
+// 是否需要导师人工评分：卷内含 manual 主观题（客观题卷提交即完成，无需评分）
+function needsMentorScoring(r){
+  return !!(r && Array.isArray(r.questions) && r.questions.some(q => q && q.manual));
+}
+
 function renderMentorScoring(){
   const records = state.mentorRecords;
-  const scored = records.filter(r => r.mentorScored);
-  const unscored = records.filter(r => !r.mentorScored);
+  // 仅统计「含主观题」的卷，避免纯客观题记录长期挂在待评分里
+  const scorable = records.filter(needsMentorScoring);
+  const scored = scorable.filter(r => r.mentorScored);
+  const unscored = scorable.filter(r => !r.mentorScored);
 
   let html = `
     <div style="display:flex;gap:8px;margin-bottom:16px">
@@ -1576,8 +1594,8 @@ function setScoringFilter(filter){
 function renderMentorScoringSub(filter){
   const records = state.mentorRecords;
   let filtered;
-  if (filter === 'scored') filtered = records.filter(r => r.mentorScored);
-  else if (filter === 'unscored') filtered = records.filter(r => !r.mentorScored);
+  if (filter === 'scored') filtered = records.filter(r => needsMentorScoring(r) && r.mentorScored);
+  else if (filter === 'unscored') filtered = records.filter(r => needsMentorScoring(r) && !r.mentorScored);
   else filtered = records;
 
   const content = $('#scoringContent');
@@ -1614,10 +1632,12 @@ function renderMentorScoringSub(filter){
           <td>${aiCell}</td>
           <td>${autoScore}</td>
           <td>${mentorScore}</td>
-          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore, passLineOf(r)).cls}">${getScoreTag(finalScore, passLineOf(r)).label}</span> ${r.mentorScored ? '<span class="badge badge-success">已评</span>' : ''}</td>
+          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore, passLineOf(r)).cls}">${getScoreTag(finalScore, passLineOf(r)).label}</span> ${needsMentorScoring(r) ? (r.mentorScored ? '<span class="badge badge-success">已评</span>' : '<span class="badge badge-warning">待评</span>') : ''}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
-            <button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">评分</button>
+            ${needsMentorScoring(r)
+              ? `<button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">${r.mentorScored ? '改分' : '评分'}</button>`
+              : `<span style="font-size:12px;color:var(--text-sec)">无需评分</span>`}
           </td>
         </tr>`;
       }).join('')}</tbody>
@@ -1651,7 +1671,8 @@ function renderQBankContent(){
   const content = $('#mentorContent');
   if (!content || !_qbankData) return;
 
-  const panels = getAllModuleIds();
+  // 场景化为固定整卷（5 场共用一份题库、按 examId 分流），不开放这里的增删改，避免误删影响多场考试
+  const panels = getAllModuleIds().filter(p => p !== 'scene');
   let totalQ = 0;
   for (const p of panels){
     for (const g of (_qbankData.questions[p]||[])){
@@ -2123,12 +2144,19 @@ async function viewRecordDetail(recordId){
 async function openScoringDetail(recordId){
   const record = state.mentorRecords.find(r => r.id === recordId);
   if (!record) return;
-  const questions = (record.questions||[]).filter(q => q.type==='short');
-  if (questions.length === 0){ showToast('无简答题','info'); return; }
+  const questions = (record.questions||[]).filter(q => q.manual);
+  if (questions.length === 0){ showToast('该卷无需导师评分','info'); return; }
   const answers = record.answers || {};
   const mentorDetails = record.mentorScoreDetails || {};
   const aiCheck = record.aiCheck || {};
   const aiColor = l => l==='高' ? 'var(--danger)' : (l==='中' ? 'var(--warning)' : 'var(--success)');
+  // 评分参考：本场通过线、客观题得分与主观题需达到的分数（场景化固定卷通过线 80）
+  const typeScores = record.typeScores || {};
+  const objectiveScore = (typeScores.single?.score||0) + (typeScores.multiple?.score||0) + (typeScores.judge?.score||0);
+  const shortMax = questions.reduce((s,q) => s + (q.points||10), 0);
+  const savedShort = questions.reduce((s,q) => s + (Number(mentorDetails[q.id]?.mentorScore)||0), 0);
+  const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (record.panel === 'scene' ? 80 : PASSING_SCORE);
+  const needShort = Math.max(0, passLine - objectiveScore);
   // 单题 AI 倾向徽章 + 命中证据
   const perQuestionAi = id => {
     const a = aiCheck.perQuestion && aiCheck.perQuestion[id];
@@ -2155,6 +2183,10 @@ async function openScoringDetail(recordId){
           <span style="font-weight:700;color:${aiColor(aiCheck.level)}">🤖 AI 综合倾向 ${aiCheck.score}分（${aiCheck.level}）</span>
           <span style="font-size:12px;color:var(--text-sec);margin-left:8px">${escapeHtml(aiCheck.summary || '')} — 仅供参考，请结合原文与命中证据人工判断</span>
         </div>` : ''}
+        <div style="padding:8px 12px;border-radius:8px;margin-bottom:12px;background:#eff6ff;border:1px solid #bfdbfe;font-size:13px;color:#1e40af;line-height:1.7">
+          🎯 本场通过线 <b>${passLine}</b> 分｜客观题已得 <b>${objectiveScore}</b> 分｜主观题满分 <b>${shortMax}</b> 分<br>
+          本场主观题需 ≥ <b>${needShort}</b> 分才可通过；当前已录入主观题 <b>${savedShort}</b> 分，合计 <b>${objectiveScore + savedShort}</b> 分
+        </div>
         ${questions.map(q => {
           const userAns = answers[q.id] || '(未作答)';
           const prev = mentorDetails[q.id] || {};
@@ -2164,6 +2196,7 @@ async function openScoringDetail(recordId){
             <div class="scoring-answer">${escapeHtml(userAns)}</div>
             ${perQuestionAi(q.id)}
             ${q.answer && q.type==='short' ? `<div style="font-size:12px;color:var(--success);background:var(--success-light);padding:6px 8px;border-radius:6px;margin-bottom:8px"><strong>参考答案：</strong>${escapeHtml(q.answer)}</div>` : ''}
+            ${q.examineRule ? `<div style="font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:6px 8px;border-radius:6px;margin-bottom:8px"><strong>评分细则：</strong>${escapeHtml(q.examineRule)}</div>` : ''}
             <div class="scoring-controls">
               <span>导师评分：</span>
               <input class="scoring-input" id="score_${recordId}_${q.id}" type="number" min="0" max="${q.points||10}" value="${prevScore}">
@@ -2188,7 +2221,7 @@ async function openScoringDetail(recordId){
 async function saveMentorScore(recordId){
   const record = state.mentorRecords.find(r => r.id === recordId);
   if (!record) return;
-  const questions = (record.questions||[]).filter(q => q.type==='short');
+  const questions = (record.questions||[]).filter(q => q.manual);
   let mentorScoreDetails = {};
   let shortScore = 0, shortMax = 0;
   const typeScores = record.typeScores || {};
@@ -2236,7 +2269,11 @@ async function saveMentorScore(recordId){
       if (idx >= 0) state.mentorRecords[idx] = res.record;
       showToast(`评分已保存！客观题${objectiveScore}分 + 简答题${shortScore}分 = ${totalScore}分`,'success');
       document.querySelector('.modal-overlay')?.remove();
-      if (state.page==='mentor' && state.mentorTab==='scoring') renderMentorScoring();
+      if (state.page==='mentor'){
+        if (state.mentorTab==='scoring') renderMentorScoring();
+        else if (state.mentorTab==='records') renderMentorRecords();
+        else if (state.mentorTab==='overview') renderMentorOverview();
+      }
     } else { showToast('保存失败','error'); }
   } catch(e){ showToast('保存失败','error'); }
 }
@@ -2250,7 +2287,11 @@ async function resetMentorScore(recordId){
       if (idx >= 0) state.mentorRecords[idx] = res.record;
       showToast('评分已重置','success');
       document.querySelector('.modal-overlay')?.remove();
-      if (state.page==='mentor' && state.mentorTab==='scoring') renderMentorScoring();
+      if (state.page==='mentor'){
+        if (state.mentorTab==='scoring') renderMentorScoring();
+        else if (state.mentorTab==='records') renderMentorRecords();
+        else if (state.mentorTab==='overview') renderMentorOverview();
+      }
     }
   } catch(e){ showToast('重置失败','error'); }
 }
@@ -3297,9 +3338,11 @@ window.APP = {
   showQRModal, showToast,
   // Leaderboard
   openLeaderboard, switchLbPanel,
+  // 导师面板
+  refreshMentorData,
   // 场景化赋能专项
   renderScenePanel, updateSceneTask, openSceneStudentsModal,
-  openDefenseListModal, openSceneDefenseModal, deleteSceneDefense,
+  openDefenseListModal, openSceneDefenseModal, deleteSceneDefense, openSceneScoring,
   // Render
   render
 };
@@ -3328,6 +3371,14 @@ function sceneOverlayBar(title, hint){
     '<h3 style="margin:0;font-size:18px;color:#1f2937;">' + title + '</h3>' +
     '<button data-act="close" style="padding:6px 12px;border:1px solid #d1d5db;background:#fff;color:#4b5563;border-radius:8px;cursor:pointer;font-size:13px;">✕ 关闭</button>' +
     '</div>' + (hint ? '<p style="margin:0 0 12px;font-size:12px;color:#9ca3af;">' + hint + '</p>' : '');
+}
+
+// 场景化：从专项页直接进入「评分管理」，用于给考试主观题二次评分
+async function openSceneScoring(){
+  state.page = 'mentor';
+  state.mentorTab = 'scoring';
+  await syncAllRecords();
+  render();
 }
 
 async function renderScenePanel(app){
@@ -3387,6 +3438,7 @@ async function renderScenePanel(app){
       <div style="display:flex;gap:10px;margin-bottom:14px">
         <button class="btn btn-outline btn-sm" onclick="APP.openSceneStudentsModal()">👥 纳入 / 移除学员</button>
         <button class="btn btn-outline btn-sm" onclick="APP.openDefenseListModal()">🎤 结业答辩评分</button>
+        <button class="btn btn-outline btn-sm" onclick="APP.openSceneScoring()">📝 考试主观题评分</button>
       </div>
       <div class="week-section"><div class="week-title">🎯 培训推进区（8周 · 14张任务卡）</div>${sceneWeekGroup(ov.tasks, ov.canEdit)}</div>
       ${sceneScoreTable(ov)}
@@ -3452,7 +3504,7 @@ function sceneWeekGroup(tasks, canEdit){
 }
 function sceneScoreTable(ov){
   const sceneKeys = ['sceneT1','sceneT2','sceneT3','sceneT4','sceneFinal'];
-  if(!ov.students.length){
+  if(!ov.scoreRows || ov.scoreRows.length === 0){
     return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:18px;text-align:center;color:#9ca3af;font-size:13px;margin-bottom:18px">
       尚未纳入学员。点击「👥 纳入 / 移除学员」把学员纳入本专项，纳入后在下方展示五场成绩与整体通过情况。
     </div>`;
@@ -3464,8 +3516,9 @@ function sceneScoreTable(ov){
       const e = row.exams[k];
       if(e){
         const done = !!e.qualified;
-        const col = done ? '#16a34a' : (e.score >= 70 ? '#f59e0b' : '#dc2626');
-        cells += `<td style="padding:8px;text-align:center;color:${col};font-weight:600;">${e.score}${done ? ' ✓' : (e.passed ? ' 待评' : '')}</td>`;
+        const pending = !done && !!e.pending;
+        const col = done ? '#16a34a' : (pending ? '#f59e0b' : (e.score >= 70 ? '#f59e0b' : '#dc2626'));
+        cells += `<td style="padding:8px;text-align:center;color:${col};font-weight:600;">${e.score}${done ? ' ✓' : (pending ? ' 待评' : '')}</td>`;
       } else {
         cells += `<td style="padding:8px;text-align:center;color:#cbd5e1;">—</td>`;
       }
