@@ -42,7 +42,7 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const PASSING_SCORE = 90;
 const MAX_ATTEMPTS = 10;
 
-const TYPE_ORDER = ['single', 'multiple', 'judge', 'short'];
+const TYPE_ORDER = ['single', 'multiple', 'fill', 'judge', 'short'];
 
 // ===== 数据持久化：Supabase PostgreSQL =====
 const db = require('./db');
@@ -165,7 +165,8 @@ async function initModuleConfig() {
     tech: { id: 'tech', name: '技术进阶', icon: '🔧', desc: '按产品系列深度考核，涵盖参数、性能、技术排查和系统架构', bankIds: [] },
     sales: { id: 'sales', name: '销售进阶', icon: '💼', desc: '按产品系列考核，侧重方案搭配、选型推荐和场景应用能力', bankIds: [] },
     client: { id: 'client', name: '客户端考核', icon: '🏢', desc: '客户现场培训考核，按产品系列出题，模拟纸质试卷模式', bankIds: [] },
-    new_product: { id: 'new_product', name: '新品考核', icon: '🆕', desc: '新品培训考核，持续更新中', bankIds: [] }
+    new_product: { id: 'new_product', name: '新品考核', icon: '🆕', desc: '新品培训考核，持续更新中', bankIds: [] },
+    audio: { id: 'audio', name: '音频场景专项', icon: '🎧', desc: '嗨动音频产品10场递进式闯关考核：基础理论→拾音/处理/功放/线材/布局→场景方案→产品选型→综合实战', bankIds: [] }
   };
   let changed = false;
   if (!config.fixedModules) { config.fixedModules = {}; changed = true; }
@@ -493,12 +494,32 @@ const EXAM_CONFIGS = {
     { id: 'sceneT3', title: '阶段测三 · 展厅拓扑与配单', panel: 'scene', stage: 3, duration: 45, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneT3', passScore: 80, totalQuestions: 28 },
     { id: 'sceneT4', title: '阶段测四 · 需求澄清与跨系统配单', panel: 'scene', stage: 4, duration: 55, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneT4', passScore: 80, totalQuestions: 24 },
     { id: 'sceneFinal', title: '结业综合测试', panel: 'scene', stage: 5, duration: 70, questionFile: 'scene/scene.js', fixed: true, examIdFilter: 'sceneFinal', passScore: 80, totalQuestions: 30 },
+  ],
+  // 嗨动音频场景专项 · 10 场闯关式固定卷（依据《嗨动视觉音频产品线上知识考核计划 V2.0》）
+  // 每卷满分 100、统一通过线 80；客观题总分均低于 80，必须经导师完成主观题评分后才可能通过。
+  // 第 1-6 场 27 题（10/5/5/5/2）；第 7-9 场 23 题（5/5/5/5/3）；第 10 场 38 题（15/5/5/10/3）。
+  audio: [
+    { id: 'audioT1', title: '第1场 · 音频基础理论与声学常识', panel: 'audio', stage: 1, duration: 60, questionFile: 'audio/audioT1.js', fixed: true, examIdFilter: 'audioT1', passScore: 80, totalQuestions: 27, distribution: { single: 10, multiple: 5, fill: 5, judge: 5, short: 2 } },
+    { id: 'audioT2', title: '第2场 · 拾音设备与话筒系统', panel: 'audio', stage: 2, duration: 60, questionFile: 'audio/audioT2.js', fixed: true, examIdFilter: 'audioT2', passScore: 80, totalQuestions: 27, distribution: { single: 10, multiple: 5, fill: 5, judge: 5, short: 2 } },
+    { id: 'audioT3', title: '第3场 · 音频处理设备与信号处理技术', panel: 'audio', stage: 3, duration: 60, questionFile: 'audio/audioT3.js', fixed: true, examIdFilter: 'audioT3', passScore: 80, totalQuestions: 27, distribution: { single: 10, multiple: 5, fill: 5, judge: 5, short: 2 } },
+    { id: 'audioT4', title: '第4场 · 功率放大与扬声器系统', panel: 'audio', stage: 4, duration: 60, questionFile: 'audio/audioT4.js', fixed: true, examIdFilter: 'audioT4', passScore: 80, totalQuestions: 27, distribution: { single: 10, multiple: 5, fill: 5, judge: 5, short: 2 } },
+    { id: 'audioT5', title: '第5场 · 音频接头、线材与系统连接', panel: 'audio', stage: 5, duration: 60, questionFile: 'audio/audioT5.js', fixed: true, examIdFilter: 'audioT5', passScore: 80, totalQuestions: 27, distribution: { single: 10, multiple: 5, fill: 5, judge: 5, short: 2 } },
+    { id: 'audioT6', title: '第6场 · 音箱布局与声场设计', panel: 'audio', stage: 6, duration: 60, questionFile: 'audio/audioT6.js', fixed: true, examIdFilter: 'audioT6', passScore: 80, totalQuestions: 27, distribution: { single: 10, multiple: 5, fill: 5, judge: 5, short: 2 } },
+    { id: 'audioT7', title: '第7场 · 场景化扩声方案设计', panel: 'audio', stage: 7, duration: 60, questionFile: 'audio/audioT7.js', fixed: true, examIdFilter: 'audioT7', passScore: 80, totalQuestions: 23, distribution: { single: 5, multiple: 5, fill: 5, judge: 5, short: 3 } },
+    { id: 'audioT8', title: '第8场 · 展厅音频三大系统', panel: 'audio', stage: 8, duration: 60, questionFile: 'audio/audioT8.js', fixed: true, examIdFilter: 'audioT8', passScore: 80, totalQuestions: 23, distribution: { single: 5, multiple: 5, fill: 5, judge: 5, short: 3 } },
+    { id: 'audioT9', title: '第9场 · 嗨动产品体系与选型应用', panel: 'audio', stage: 9, duration: 60, questionFile: 'audio/audioT9.js', fixed: true, examIdFilter: 'audioT9', passScore: 80, totalQuestions: 23, distribution: { single: 5, multiple: 5, fill: 5, judge: 5, short: 3 } },
+    { id: 'audioT10', title: '第10场 · 综合方案设计与项目实战', panel: 'audio', stage: 10, duration: 90, questionFile: 'audio/audioT10.js', fixed: true, examIdFilter: 'audioT10', passScore: 80, totalQuestions: 38, distribution: { single: 15, multiple: 5, fill: 5, judge: 10, short: 3 } },
   ]
 };
 
 // ===== 场景化专项 · 闯关顺序与合格判定 =====
 // 闯关规则：按顺序考核，前一场「通过且主观题已由导师评分」后才解锁下一场。
 const SCENE_EXAM_SEQUENCE = ['sceneT1', 'sceneT2', 'sceneT3', 'sceneT4', 'sceneFinal'];
+// 音频场景专项 · 10 场闯关顺序（上一场达到 80 分且主观题已评分才解锁下一场）
+const AUDIO_EXAM_SEQUENCE = ['audioT1', 'audioT2', 'audioT3', 'audioT4', 'audioT5', 'audioT6', 'audioT7', 'audioT8', 'audioT9', 'audioT10'];
+// 所有采用「闯关解锁」的专项模块，统一由此表驱动
+const GATED_EXAM_SEQUENCES = { scene: SCENE_EXAM_SEQUENCE, audio: AUDIO_EXAM_SEQUENCE };
+function isGatedPanel(panel) { return !!GATED_EXAM_SEQUENCES[panel]; }
 
 // 取一组记录中最终得分最高的一条（finalScore 优先，其次 autoScore）
 function bestRecordOf(list) {
@@ -520,7 +541,7 @@ function sceneRecordQualified(r) {
 // ===== Fisher-Yates 洗牌 =====
 async function getAllExams() {
   const all = [];
-  for (const panel of ['newbie', 'tech', 'sales', 'client', 'training', 'scene']) {
+  for (const panel of ['newbie', 'tech', 'sales', 'client', 'training', 'scene', 'audio']) {
     for (const exam of (EXAM_CONFIGS[panel] || [])) all.push({ ...exam });
   }
   const config = await getModuleConfig();
@@ -552,7 +573,7 @@ async function getAllExams() {
 }
 
 async function getAllPanels() {
-  const panels = ['newbie', 'tech', 'sales', 'client', 'training', 'scene'];
+  const panels = ['newbie', 'tech', 'sales', 'client', 'training', 'scene', 'audio'];
   const config = await getModuleConfig();
   const meta = await db.readObj('new_product_meta.json');
   for (const [moduleId, mod] of Object.entries(config.fixedModules || {})) {
@@ -573,6 +594,27 @@ function shuffle(arr) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+// 音频专项固定卷：打乱题目顺序 + 打乱单选/多选选项顺序，并同步重映射答案
+function shuffleAudioPaper(questions) {
+  const LETTERS = 'ABCDEFGH';
+  const mixed = shuffle(questions).map(q => {
+    if ((q.type !== 'single' && q.type !== 'multiple') || !Array.isArray(q.options) || q.options.length === 0) return q;
+    const entries = q.options.map((text, i) => ({
+      text: String(text).replace(new RegExp('^[' + LETTERS + 'Ａ-Ｈ][.、．]\\s*'), '').trim(),
+      orig: LETTERS[i]
+    }));
+    const shuffled = shuffle(entries);
+    const options = shuffled.map((e, i) => LETTERS[i] + '. ' + e.text);
+    const correct = String(q.answer || '').toUpperCase().split('')
+      .filter(ch => LETTERS.indexOf(ch) >= 0)
+      .map(ch => LETTERS[shuffled.findIndex(e => e.orig === ch)])
+      .filter(Boolean)
+      .sort();
+    return { ...q, options, answer: correct.join('') };
+  });
+  return mixed;
 }
 
 // ===== 抽题（课目隔离 —— 原则性规则）=====
@@ -632,7 +674,7 @@ function pickQuestions(bank, config, examId) {
     const bi = TYPE_ORDER.indexOf(b._type || b.type);
     return ai - bi;
   });
-  const TYPE_WEIGHT = { single: 3, multiple: 5, judge: 4, short: 8 };
+  const TYPE_WEIGHT = { single: 3, multiple: 5, fill: 2, judge: 4, short: 8 };
   let totalWeight = 0;
   for (const q of result) totalWeight += TYPE_WEIGHT[q._type || q.type] || 3;
   const scale = totalWeight > 0 ? 100 / totalWeight : 1;
@@ -643,6 +685,18 @@ function pickQuestions(bank, config, examId) {
   const currentTotal = result.reduce((s, q) => s + q.points, 0);
   if (result.length > 0 && currentTotal !== 100) result[result.length - 1].points += (100 - currentTotal);
   return result;
+}
+
+// 填空题判分：忽略大小写/空白/中英文标点，支持用 | 分隔的多个等价答案（如 100V|100 V）
+function normalizeFill(s) {
+  return String(s || '').toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[，,。.；;：:'"“”‘’（）()【】\[\]——\-_/、]/g, '');
+}
+function fillAnswerCorrect(userAnswer, answer) {
+  const alts = String(answer || '').split(/[|｜]/).map(normalizeFill).filter(Boolean);
+  if (alts.length === 0) return false;
+  return alts.includes(normalizeFill(userAnswer));
 }
 
 function gradeShortAnswer(answer, keywords, maxPoints) {
@@ -657,7 +711,7 @@ function gradeShortAnswer(answer, keywords, maxPoints) {
 }
 
 // ===== 面板中文名 =====
-const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销售进阶', client: '客户端考核', new_product: '新品考核', scene: '场景化赋能专项' };
+const PANEL_LABELS = { newbie: '新人专项', tech: '技术进阶', sales: '销售进阶', client: '客户端考核', new_product: '新品考核', scene: '场景化赋能专项', audio: '音频场景专项' };
 
 // ====== API 路由 ======
 
@@ -981,10 +1035,10 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   }
 
   // 按学生分组，每场考试(panel+examId)取最高分
-  // 场景化专项（panel=scene）不进全局排行榜与积分，保持两套独立
+  // 专项模块（场景化/音频场景）不进全局排行榜与积分，保持与通用板块相对独立
   const studentMap = {};
   for (const r of records) {
-    if (r.panel === 'scene') continue;
+    if (isGatedPanel(r.panel)) continue;
     const name = r.studentName;
     if (!studentMap[name]) studentMap[name] = { records: [], exams: {} };
     studentMap[name].records.push(r);
@@ -1119,11 +1173,12 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
 
   const records = await db.readJSON('records.json');
 
-  // ===== 场景化专项 · 闯关校验：上一场达到通过线并完成导师评分后，才允许开始本场 =====
-  if (exam.panel === 'scene') {
-    const seqIdx = SCENE_EXAM_SEQUENCE.indexOf(examId);
+  // ===== 专项模块 · 闯关校验：上一场达到通过线并完成导师评分后，才允许开始本场 =====
+  if (isGatedPanel(exam.panel)) {
+    const seq = GATED_EXAM_SEQUENCES[exam.panel];
+    const seqIdx = seq.indexOf(examId);
     if (seqIdx > 0) {
-      const prevId = SCENE_EXAM_SEQUENCE[seqIdx - 1];
+      const prevId = seq[seqIdx - 1];
       const prevRecords = records.filter(r => r.studentName === studentName && r.examId === prevId);
       if (!prevRecords.some(sceneRecordQualified)) {
         const prevExam = allExams.find(e => e.id === prevId);
@@ -1176,7 +1231,8 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
       console.error('[fixed] 固定整卷题数不足:', exam.examIdFilter, picked.length, '/', exam.totalQuestions);
       return res.status(500).json({ error: '该固定卷题库配置不完整，请联系管理员' });
     }
-    questions = picked;
+    // 音频专项：固定整卷按文档「重考不得与上次完全相同」的要求，每卷打乱题目顺序与选项顺序
+    questions = exam.panel === 'audio' ? shuffleAudioPaper(picked) : picked;
   } else if (exam.distribution) {
     // 一律传本场 exam.id：题库是否按课目隔离由 pickQuestions 依据题库是否有 examId 标签判定
     questions = pickQuestions(bank, exam, exam.id);
@@ -1262,7 +1318,7 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
 
     let autoScore = 0;
     const questionScores = {};
-    const typeScores = { single: { score: 0, max: 0 }, multiple: { score: 0, max: 0 }, judge: { score: 0, max: 0 }, short: { score: 0, max: 0 } };
+    const typeScores = { single: { score: 0, max: 0 }, multiple: { score: 0, max: 0 }, fill: { score: 0, max: 0 }, judge: { score: 0, max: 0 }, short: { score: 0, max: 0 } };
 
     // 归一化答案格式：数组→排序字符串，布尔→A/B，字符串→原样
     function normalizeAns(ans) {
@@ -1288,6 +1344,8 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
         score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
       } else if (qType === 'multiple') {
         score = (normalizeAns(userAnswer) === normalizeAns(q.answer)) ? points : 0;
+      } else if (qType === 'fill') {
+        score = fillAnswerCorrect(userAnswer, q.answer) ? points : 0;
       } else if (qType === 'short') {
         score = gradeShortAnswer(userAnswer, q.keywords, points);
       }
@@ -1318,7 +1376,7 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
     recordSafe.questionScores = questionScores;
     recordSafe.typeScores = typeScores;
     recordSafe.mentorScored = false;
-    recordSafe.mentorPending = (recordSafe.panel === 'scene');
+    recordSafe.mentorPending = isGatedPanel(recordSafe.panel);
 
     records.push(recordSafe);
     await db.writeRaw('records.json', records);
@@ -1369,9 +1427,9 @@ app.get('/api/mentor/records', mentorAuth, async (req, res) => {
       const u = users[s];
       if (u) assignedNames.add(u.name);
     }
-    // 场景化专项为独立培养计划（名单在 scene_progress.json 维护，且总览对全体导师可见），
-    // 其记录不受 mentors.json 分配限制，否则导师在「评分管理」看不到场景卷、无法二次评分
-    filtered = filtered.filter(r => assignedNames.has(r.studentName) || r.panel === 'scene');
+    // 场景化/音频场景专项为独立培养计划，其记录不受 mentors.json 分配限制，
+    // 否则导师在「评分管理」看不到专项卷、无法完成主观题二次评分
+    filtered = filtered.filter(r => assignedNames.has(r.studentName) || isGatedPanel(r.panel));
   }
   
   // 考试标题映射（供按「考试名称」筛选 + 展示，考试ID/标题均可命中）
@@ -1415,8 +1473,8 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
     const assigned = mentors[req.currentUser.username] || [];
     const users = await db.readObj('users.json');
     const assignedNames = new Set(assigned.map(s => { const u = users[s]; return u ? u.name : s; }));
-    // 场景化专项记录不受分配限制，导出时一并包含
-    filtered = filtered.filter(r => assignedNames.has(r.studentName) || r.panel === 'scene');
+    // 专项模块记录不受分配限制，导出时一并包含
+    filtered = filtered.filter(r => assignedNames.has(r.studentName) || isGatedPanel(r.panel));
   }
   
   const exams = await getAllExams();
@@ -1516,7 +1574,7 @@ app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
     const score = (target.finalScore !== undefined && target.finalScore !== null) ? target.finalScore : (target.autoScore || 0);
     target.passScore = line;
     target.passed = Number(score) >= line;
-    if (target.panel === 'scene') target.mentorPending = !target.mentorScored;
+    if (isGatedPanel(target.panel)) target.mentorPending = !target.mentorScored;
     await db.writeRaw('records.json', records);
     saved = target;
   });
@@ -1546,8 +1604,8 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
     if (idx < 0) return;
     records[idx].mentorScore = null;
     records[idx].finalScore = records[idx].autoScore;
-    // 撤销评分后：场景化固定卷按该卷通过线重判，其余沿用全局通过线
-    if (records[idx].panel === 'scene') {
+    // 撤销评分后：闯关式固定卷（场景化/音频）按该卷通过线重判，其余沿用全局通过线
+    if (isGatedPanel(records[idx].panel)) {
       const examCfg = (await getAllExams()).find(e => e.id === records[idx].examId);
       records[idx].passScore = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
       records[idx].passed = records[idx].autoScore >= records[idx].passScore;
@@ -1555,7 +1613,7 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
       records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
     }
     records[idx].mentorScored = false;
-    records[idx].mentorPending = (records[idx].panel === 'scene');
+    records[idx].mentorPending = isGatedPanel(records[idx].panel);
     records[idx].mentorScoreDetails = null;
     await db.writeRaw('records.json', records);
     saved = records[idx];
@@ -1683,6 +1741,73 @@ app.get('/api/scene/status', authMiddleware, async (req, res) => {
     });
   } catch (e) {
     console.error('[scene/status] error:', e.message);
+    res.status(500).json({ error: '获取闯关状态失败：' + e.message });
+  }
+});
+
+// ===== 学员端：音频场景专项闯关状态（10 场解锁 / 待评分 / 已通过 / 总评） =====
+app.get('/api/audio/status', authMiddleware, async (req, res) => {
+  try {
+    const studentName = req.currentUser ? req.currentUser.name : '';
+    if (!studentName) return res.status(401).json({ error: '未登录' });
+    const records = await db.readJSON('records.json');
+    const mine = records.filter(r => r.studentName === studentName && AUDIO_EXAM_SEQUENCE.includes(r.examId));
+
+    const exams = [];
+    let prevQualified = true;
+    for (const cfg of EXAM_CONFIGS.audio) {
+      const rs = mine.filter(r => r.examId === cfg.id);
+      const best = bestRecordOf(rs);
+      const qualified = rs.some(sceneRecordQualified);
+      const pending = !qualified && rs.some(r => r.mentorPending || (r.passed && !r.mentorScored));
+      const unlocked = prevQualified;
+      let status = 'unstarted';
+      if (qualified) status = 'passed';
+      else if (!unlocked) status = 'locked';
+      else if (pending) status = 'pending';
+      else if (rs.length > 0) status = 'failed';
+      exams.push({
+        id: cfg.id,
+        title: cfg.title,
+        stage: cfg.stage,
+        duration: cfg.duration,
+        passScore: cfg.passScore,
+        totalQuestions: cfg.totalQuestions,
+        unlocked,
+        qualified,
+        pending,
+        status,
+        attempts: rs.length,
+        bestScore: best ? ((best.finalScore !== undefined && best.finalScore !== null) ? best.finalScore : (best.autoScore || 0)) : null,
+        lastRecordId: best ? best.id : null
+      });
+      prevQualified = qualified;
+    }
+
+    // 总评：前 9 场平均分 × 70% + 第 10 场 × 30%（需 10 场全部通过后才出总评）
+    let totalScore = null;
+    let totalLevel = null;
+    const allPassed = exams.every(e => e.qualified);
+    if (allPassed) {
+      const first9 = exams.slice(0, 9);
+      const avg = first9.reduce((s, e) => s + (e.bestScore || 0), 0) / 9;
+      const finalScore = exams[9].bestScore || 0;
+      totalScore = Math.round((avg * 0.7 + finalScore * 0.3) * 10) / 10;
+      // 等级严格按导师计划：≥90 优秀、80-89 合格、<80 待提升
+      totalLevel = totalScore >= 90 ? '优秀' : totalScore >= 80 ? '合格' : '待提升';
+    }
+
+    res.json({
+      success: true,
+      studentName,
+      passScore: 80,
+      exams,
+      allPassed,
+      totalScore,
+      totalLevel
+    });
+  } catch (e) {
+    console.error('[audio/status] error:', e.message);
     res.status(500).json({ error: '获取闯关状态失败：' + e.message });
   }
 });
@@ -1928,7 +2053,8 @@ app.get('/api/mentor/questions', mentorAuth, async (req, res) => {
 // 板块中文名（导出专用，含 training；未收录的模块从 module_config 取 name）
 const EXPORT_PANEL_LABELS = {
   newbie: '新人专项', training: '新人培训专项（祥雨/伟桀）', tech: '技术进阶',
-  sales: '销售进阶', client: '客户端考核', new_product: '新品考核', scene: '场景化赋能专项'
+  sales: '销售进阶', client: '客户端考核', new_product: '新品考核', scene: '场景化赋能专项',
+  audio: '音频场景专项'
 };
 async function exportPanelLabel(panelId) {
   if (EXPORT_PANEL_LABELS[panelId]) return EXPORT_PANEL_LABELS[panelId];
@@ -2382,7 +2508,8 @@ app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
     const assigned = mentors[req.currentUser.username] || [];
     const users = await db.readObj('users.json');
     const assignedNames = new Set(assigned.map(s => { const u = users[s]; return u ? u.name : s; }));
-    filtered = filtered.filter(r => assignedNames.has(r.studentName));
+    // 专项模块记录对全体导师可见（与评分管理口径一致）
+    filtered = filtered.filter(r => assignedNames.has(r.studentName) || isGatedPanel(r.panel));
   }
   
   if (studentName) filtered = filtered.filter(r => r.studentName === studentName);

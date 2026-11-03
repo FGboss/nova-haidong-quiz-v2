@@ -22,6 +22,7 @@
 --client-color:#0891b2;--client-light:#cffafe;
 --new-product-color:#db2777;--new-product-light:#fce7f3;
 --scene-color:#0891b2;--scene-light:#cffafe;
+--audio-color:#7c3aed;--audio-light:#ede9fe;
 }
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh;-webkit-font-smoothing:antialiased}
 #app{min-height:100vh}
@@ -57,6 +58,7 @@ button,.btn,.option-item,.judge-btn,.panel-card,.exam-item,.tab,.auth-tab,.nav-b
 .badge-client{background:var(--client-light);color:var(--client-color)}
 .badge-new-product{background:var(--new-product-light);color:var(--new-product-color)}
 .badge-scene{background:var(--scene-light);color:var(--scene-color)}
+.badge-audio{background:var(--audio-light);color:var(--audio-color)}
 
 /* Forms */
 .form-group{margin-bottom:16px}
@@ -98,6 +100,7 @@ button,.btn,.option-item,.judge-btn,.panel-card,.exam-item,.tab,.auth-tab,.nav-b
 .panel-card.client{border-color:var(--client-color)}.panel-card.client:hover{background:var(--client-light)}
 .panel-card.new-product{border-color:var(--new-product-color)}.panel-card.new-product:hover{background:var(--new-product-light)}
 .panel-card.scene{border-color:var(--scene-color)}.panel-card.scene:hover{background:var(--scene-light)}
+.panel-card.audio{border-color:var(--audio-color)}.panel-card.audio:hover{background:var(--audio-light)}
 .panel-icon{font-size:48px;margin-bottom:12px;line-height:1}
 .panel-title{font-size:20px;font-weight:700;margin-bottom:6px}
 .panel-desc{font-size:13px;color:var(--text-sec);margin-bottom:12px;line-height:1.5}
@@ -134,6 +137,7 @@ button,.btn,.option-item,.judge-btn,.panel-card,.exam-item,.tab,.auth-tab,.nav-b
 .question-type{display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;margin-bottom:8px}
 .question-type.single{background:#dbeafe;color:#1e40af}
 .question-type.multiple{background:#fce7f3;color:#9d174d}
+.question-type.fill{background:#ede9fe;color:#6d28d9}
 .question-type.judge{background:#d1fae5;color:#065f46}
 .question-type.short{background:#fef3c7;color:#92400e}
 .question-text{font-size:15px;font-weight:600;margin-bottom:14px;line-height:1.7}
@@ -154,6 +158,8 @@ button,.btn,.option-item,.judge-btn,.panel-card,.exam-item,.tab,.auth-tab,.nav-b
 .judge-btn.selected{border-color:var(--primary);background:var(--primary-light);color:var(--primary)}
 .short-answer{width:100%;min-height:120px;padding:12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;resize:vertical;font-family:inherit}
 .short-answer:focus{outline:none;border-color:var(--primary)}
+.fill-answer{width:100%;padding:11px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-family:inherit;background:#fff}
+.fill-answer:focus{outline:none;border-color:#7c3aed}
 
 /* Score */
 .score-display{text-align:center;padding:30px 20px}

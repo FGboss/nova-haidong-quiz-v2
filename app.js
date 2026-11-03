@@ -17,7 +17,7 @@ function getScoreTag(score, passLine){
 function passLineOf(r){
   if (!r) return undefined;
   if (typeof r.passScore === 'number' && r.passScore > 0) return r.passScore;
-  return r.panel === 'scene' ? 80 : undefined;
+  return isGatedPanel(r.panel) ? 80 : undefined;
 }
 function reminderBanner(compact){
   return `<div style="background:linear-gradient(90deg,#fef3c7,#fde68a);border:1px solid #f59e0b;color:#92400e;border-radius:10px;padding:${compact?'7px 14px':'11px 16px'};font-size:${compact?'12px':'13px'};font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;line-height:1.5">
@@ -25,9 +25,9 @@ function reminderBanner(compact){
     <span>${REMINDER_TEXT}</span>
   </div>`;
 }
-const PANEL_LABELS = { newbie:'新人专项', training:'新人培训专项（祥雨/伟桀）', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核', scene:'场景化赋能专项' };
-const PANEL_COLORS = { newbie:'newbie', training:'training', tech:'tech', sales:'sales', client:'client', new_product:'new-product', scene:'scene' };
-const PANEL_ICONS = { newbie:'📚', training:'🎓', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕', scene:'🎯' };
+const PANEL_LABELS = { newbie:'新人专项', training:'新人培训专项（祥雨/伟桀）', tech:'技术进阶', sales:'销售进阶', client:'客户端考核', new_product:'新品考核', scene:'场景化赋能专项', audio:'音频场景专项' };
+const PANEL_COLORS = { newbie:'newbie', training:'training', tech:'tech', sales:'sales', client:'client', new_product:'new-product', scene:'scene', audio:'audio' };
+const PANEL_ICONS = { newbie:'📚', training:'🎓', tech:'🔧', sales:'💼', client:'🏢', new_product:'🆕', scene:'🎯', audio:'🎧' };
 const PANEL_DESCS = {
   newbie:'3周系统培训考核，每日一考+周考，15套试卷覆盖产品基础知识',
   training:'嗨动产品线新人培训考核，5大产品系列，按百分比评分+随机出题',
@@ -35,10 +35,13 @@ const PANEL_DESCS = {
   sales:'按产品系列考核，侧重方案搭配、选型推荐和场景应用能力',
   client:'客户现场培训考核，按产品系列出题，模拟纸质试卷模式',
   new_product:'新品培训考核，持续更新中',
-  scene:'音视频集成场景化赋能：8周任务卡 + 5场闯关式考核 + 结业答辩，独立通过线'
+  scene:'音视频集成场景化赋能：8周任务卡 + 5场闯关式考核 + 结业答辩，独立通过线',
+  audio:'嗨动音频产品线上知识考核：10场递进式闯关（基础理论→拾音→处理→功放→线材→声场→方案→展厅→选型→综合实战），单场100分、通过线80分'
 };
 const SCENE_EXAM_LABELS = { sceneT1:'阶段测一 · 集成全景与产品地图', sceneT2:'阶段测二 · 会议室拓扑与配单', sceneT3:'阶段测三 · 展厅拓扑与配单', sceneT4:'阶段测四 · 需求澄清与跨系统配单', sceneFinal:'结业综合测试' };
-const TYPE_LABELS = { single:'单选题', multiple:'多选题', judge:'判断题', short:'简答题' };
+const TYPE_LABELS = { single:'单选题', multiple:'多选题', fill:'填空题', judge:'判断题', short:'简答题' };
+const GATED_PANELS = ['scene', 'audio'];
+function isGatedPanel(panel){ return GATED_PANELS.includes(panel); }
 
 // ===== 状态 =====
 let state = {
@@ -76,6 +79,8 @@ let state = {
   searchStudent:'',
   // Scoring filter
   scoringFilter:'unscored',
+  // 音频专项闯关状态
+  audioStatus:null,
 };
 
 // ===== 工具函数 =====
@@ -480,7 +485,7 @@ async function renderHome(app){
   } catch(e) { console.error('load modules:', e); }
 
   // Build panel list
-  const fixedPanels = ['newbie', 'training', 'tech', 'sales', 'client', 'scene'];
+  const fixedPanels = ['newbie', 'training', 'tech', 'sales', 'client', 'scene', 'audio'];
   const dynamicPanels = [];
   for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
     if (fixedPanels.includes(id)) continue;
@@ -538,6 +543,11 @@ function renderPanelCard(panel){
         <span class="badge badge-scene">5套闯关卷</span>
         <span class="badge badge-scene">通过线80</span>
         <span class="badge badge-scene">14张任务卡</span>
+      </div>` : panel === 'audio' ? `
+      <div class="panel-meta">
+        <span class="badge badge-audio">10场闯关卷</span>
+        <span class="badge badge-audio">269道题</span>
+        <span class="badge badge-audio">通过线80</span>
       </div>` : `
       <div class="panel-meta">
         <span class="badge badge-${panel}">${examCounts[panel]||8}套考试</span>
@@ -575,6 +585,10 @@ async function enterPanel(panel, panelName, panelIcon){
   const res = await api(`/api/exams?panel=${panel}`);
   if (res.success){
     state.exams = res.exams;
+    if (panel === 'audio'){
+      const st = await api('/api/audio/status');
+      if (st && st.success) state.audioStatus = st;
+    }
     const attRes = await api(`/api/attempts/${encodeURIComponent(state.currentUser.name)}`);
     if (attRes.success){
       state.exams = state.exams.map(e => ({
@@ -614,6 +628,11 @@ function renderPanel(app){
   const panelName = state.panelInfo ? state.panelInfo.name : (PANEL_LABELS[panel] || '考核');
   const panelQrUrl = `${baseUrl}?panel=${panel}`;
 
+  // 音频场景专项：10 场闯关独立渲染
+  if (panel === 'audio'){
+    renderAudioPanel(app);
+    return;
+  }
   // 场景化赋能专项：独立渲染（顶层推进区 + 固定卷考试 + 结业答辩）
   if (panel === 'scene'){
     renderScenePanel(app);
@@ -679,7 +698,7 @@ function renderPanel(app){
 function renderExamList(exams){
   const baseUrl = getBaseUrl();
   const panel = state.panel;
-  const isScene = panel === 'scene';
+  const isScene = isGatedPanel(panel);
   return `<div class="exam-list">${exams.map(e => {
     const qrUrl = `${baseUrl}?panel=${panel}&exam=${e.id}`;
     const locked = !!e._locked;
@@ -786,14 +805,16 @@ function renderQuestion(q, i){
     html += `<div class="question-options">${(q.options||[]).map((opt,oi) => `
       <div class="option-item" data-qid="${q.id}" data-answer="${String.fromCharCode(65+oi)}" data-type="single">
         <div class="option-radio"></div>
-        <div class="option-text">${String.fromCharCode(65+oi)}. ${escapeHtml(opt)}</div>
+        <div class="option-text">${String.fromCharCode(65+oi)}. ${escapeHtml(String(opt).replace(/^[A-HＡ-Ｈ][.、．)]\s*/, ''))}</div>
       </div>`).join('')}</div>`;
   } else if (q.type === 'multiple'){
     html += `<div class="question-options">${(q.options||[]).map((opt,oi) => `
       <div class="option-item" data-qid="${q.id}" data-answer="${String.fromCharCode(65+oi)}" data-type="multiple">
         <div class="option-checkbox"></div>
-        <div class="option-text">${String.fromCharCode(65+oi)}. ${escapeHtml(opt)}</div>
+        <div class="option-text">${String.fromCharCode(65+oi)}. ${escapeHtml(String(opt).replace(/^[A-HＡ-Ｈ][.、．)]\s*/, ''))}</div>
       </div>`).join('')}</div>`;
+  } else if (q.type === 'fill'){
+    html += `<input type="text" class="fill-answer" data-qid="${q.id}" data-type="fill" autocomplete="off" placeholder="请填写答案（只填横线处内容）">`;
   } else if (q.type === 'judge'){
     html += `<div class="judge-btns">
       <div class="judge-btn" data-qid="${q.id}" data-answer="A" data-type="judge">✓ 正确</div>
@@ -831,7 +852,7 @@ function bindQuestionEvents(){
     });
   });
 
-  $$('.short-answer').forEach(el => {
+  $$('.short-answer, .fill-answer').forEach(el => {
     bindSearchInput(el, v => {
       state.answers[el.dataset.qid] = v;
       updateProgress();
@@ -843,6 +864,8 @@ function bindQuestionEvents(){
     const ans = state.answers[qid];
     const qEl = $(`#q_${qid}`);
     if (!qEl) continue;
+    const fillEl = qEl.querySelector('.fill-answer');
+    if (fillEl) { fillEl.value = String(ans); continue; }
     const firstItem = qEl.querySelector('.option-item, .judge-btn');
     if (!firstItem) continue;
     const type = firstItem.dataset.type;
@@ -955,7 +978,7 @@ function renderResult(app){
 
   const score = record.finalScore !== undefined ? record.finalScore : record.autoScore;
   const passLine = (exam && exam.passScore) ? exam.passScore : PASSING_SCORE;
-  const isScene = !!(exam && exam.panel === 'scene');
+  const isScene = !!(exam && isGatedPanel(exam.panel));
   const pendingMentor = isScene && !!record.mentorPending && !record.mentorScored;
   const typeScores = record.typeScores || {};
   const tag = getScoreTag(score, passLine);
@@ -988,7 +1011,7 @@ function renderResult(app){
         ${isScene ? `<div style="font-size:12px;color:var(--text-sec);margin-top:6px">${pendingMentor ? '导师评分完成后自动更新；通过后解锁下一场。' : (record.passed ? '本场已通过，可返回列表继续下一场。' : '未达通过线，可重新作答本场。')}</div>` : ''}
       </div>
       <div class="score-breakdown">
-        ${['single','multiple','judge','short'].map(t => `
+        ${['single','multiple','fill','judge','short'].map(t => `
           <div class="score-item">
             <div class="score-item-label">${TYPE_LABELS[t]}</div>
             <div class="score-item-value">${(typeScores[t]||{}).score||0} / ${(typeScores[t]||{}).max||0}</div>
@@ -1024,8 +1047,8 @@ function goHome(){
 
 // ===== 模块辅助函数 =====
 function getAllModuleIds(){
-  // scene 为固定整卷模块（无 bankIds），但需参与导师记录/评分/看板统计
-  const ids = ['newbie', 'training', 'tech', 'sales', 'client', 'scene'];
+  // scene / audio 为固定整卷专项模块（无 bankIds），但需参与导师记录/评分/看板统计
+  const ids = ['newbie', 'training', 'tech', 'sales', 'client', 'scene', 'audio'];
   for (const [id, mod] of Object.entries(state.modules.fixedModules || {})) {
     if (ids.includes(id)) continue;
     if ((mod.bankIds || []).length > 0) ids.push(id);
@@ -1672,7 +1695,7 @@ function renderQBankContent(){
   if (!content || !_qbankData) return;
 
   // 场景化为固定整卷（5 场共用一份题库、按 examId 分流），不开放这里的增删改，避免误删影响多场考试
-  const panels = getAllModuleIds().filter(p => p !== 'scene');
+  const panels = getAllModuleIds().filter(p => p !== 'scene' && p !== 'audio');
   let totalQ = 0;
   for (const p of panels){
     for (const g of (_qbankData.questions[p]||[])){
@@ -1722,7 +1745,7 @@ function renderQBankContent(){
         <div style="max-height:600px;overflow-y:auto">
           ${questions.map((q,i) => {
             const typeLabel = TYPE_LABELS[q.type]||'单选题';
-            const typeColor = { single:'#1e40af', multiple:'#9d174d', judge:'#065f46', short:'#92400e' }[q.type]||'#333';
+            const typeColor = { single:'#1e40af', multiple:'#9d174d', fill:'#7c3aed', judge:'#065f46', short:'#92400e' }[q.type]||'#333';
             return `<div class="qbank-item" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#fafbfc">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
                 <div style="flex:1">
@@ -2083,7 +2106,7 @@ async function renderMentorWeakAreas(){
         <td>${s.totalExams}</td><td>${s.totalQuestions}</td>
         <td><span style="color:var(--danger);font-weight:700">${s.wrongQuestions}</span></td>
         <td><span style="color:${errorRateColor};font-weight:700">${s.errorRate}%</span></td>
-        <td style="font-size:12px">${['single','multiple','judge','short'].map(t => { const c=s.wrongByType[t]||0; return c>0?`${TYPE_LABELS[t]}:${c}`:''; }).filter(Boolean).join(' ')||'-'}</td>
+        <td style="font-size:12px">${['single','multiple','fill','judge','short'].map(t => { const c=s.wrongByType[t]||0; return c>0?`${TYPE_LABELS[t]}:${c}`:''; }).filter(Boolean).join(' ')||'-'}</td>
         <td style="font-size:12px">${worstExamLabel}</td>
         <td><button class="btn btn-sm btn-outline" onclick="APP.viewStudentWeakDetail('${jsEscape(s.studentName)}')">查看详情</button></td>
       </tr>`;
@@ -2152,10 +2175,10 @@ async function openScoringDetail(recordId){
   const aiColor = l => l==='高' ? 'var(--danger)' : (l==='中' ? 'var(--warning)' : 'var(--success)');
   // 评分参考：本场通过线、客观题得分与主观题需达到的分数（场景化固定卷通过线 80）
   const typeScores = record.typeScores || {};
-  const objectiveScore = (typeScores.single?.score||0) + (typeScores.multiple?.score||0) + (typeScores.judge?.score||0);
+  const objectiveScore = (typeScores.single?.score||0) + (typeScores.multiple?.score||0) + (typeScores.fill?.score||0) + (typeScores.judge?.score||0);
   const shortMax = questions.reduce((s,q) => s + (q.points||10), 0);
   const savedShort = questions.reduce((s,q) => s + (Number(mentorDetails[q.id]?.mentorScore)||0), 0);
-  const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (record.panel === 'scene' ? 80 : PASSING_SCORE);
+  const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (isGatedPanel(record.panel) ? 80 : PASSING_SCORE);
   const needShort = Math.max(0, passLine - objectiveScore);
   // 单题 AI 倾向徽章 + 命中证据
   const perQuestionAi = id => {
@@ -2225,11 +2248,12 @@ async function saveMentorScore(recordId){
   let mentorScoreDetails = {};
   let shortScore = 0, shortMax = 0;
   const typeScores = record.typeScores || {};
-  const objectiveScore = (typeScores.single?.score||0) + (typeScores.multiple?.score||0) + (typeScores.judge?.score||0);
+  const objectiveScore = (typeScores.single?.score||0) + (typeScores.multiple?.score||0) + (typeScores.fill?.score||0) + (typeScores.judge?.score||0);
   const newQuestionScores = { ...(record.questionScores||{}) };
   const newTypeScores = {
     single: { ...(typeScores.single||{score:0,max:0}) },
     multiple: { ...(typeScores.multiple||{score:0,max:0}) },
+    fill: { ...(typeScores.fill||{score:0,max:0}) },
     judge: { ...(typeScores.judge||{score:0,max:0}) },
     short: { score:0, max:0 }
   };
@@ -2254,7 +2278,7 @@ async function saveMentorScore(recordId){
   const mentorComment = commentEl ? commentEl.value.trim() : (record.mentorComment || '');
 
   // 通过线按该场考试自身配置判定（场景化固定卷为 80 分），服务端也会按同一口径重算
-  const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (record.panel === 'scene' ? 80 : PASSING_SCORE);
+  const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (isGatedPanel(record.panel) ? 80 : PASSING_SCORE);
   try {
     const res = await api(`/api/mentor/records/${recordId}/score`, {
       method:'PUT', body:JSON.stringify({
@@ -3379,6 +3403,88 @@ async function openSceneScoring(){
   state.mentorTab = 'scoring';
   await syncAllRecords();
   render();
+}
+
+// ===== 音频场景专项面板（10 场闯关） =====
+async function renderAudioPanel(app){
+  const user = state.currentUser;
+  const isManager = (user.role === 'mentor' || user.role === 'admin');
+  const exams = state.exams || [];
+  const baseUrl = getBaseUrl();
+
+  let st = state.audioStatus;
+  if (!st || !st.exams){
+    try{ const r = await api('/api/audio/status'); if (r && r.success){ st = r; state.audioStatus = r; } }catch(e){ console.error('audio status:', e); }
+  }
+  const statusMap = {};
+  if (st) for (const s of (st.exams || [])) statusMap[s.id] = s;
+  const examsView = exams.map(e => {
+    const s = statusMap[e.id];
+    return s ? { ...e, _locked: !s.unlocked, _status: s.status, _pending: s.pending, _bestScore: s.bestScore } : e;
+  });
+  const passedCount = ((st && st.exams) || []).filter(x => x.qualified).length;
+
+  const header = `
+    <div class="header">
+      <div class="header-inner">
+        <div>
+          <div class="nav-back" onclick="APP.goHome()">← 返回首页</div>
+          <h1 style="margin-top:4px">🎧 音频场景专项</h1>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="qr-btn qr-btn-white" onclick="APP.showQRModal('音频场景专项','${baseUrl}?panel=audio','扫码直接进入音频场景专项考核')" title="扫码分享此模块">📱</button>
+          <span style="font-size:13px;opacity:.9">${escapeHtml(user.name)}</span>
+          <button class="btn btn-outline btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3);margin-left:8px" onclick="APP.goHome()">返回</button>
+        </div>
+      </div>
+    </div>`;
+
+  const totalHtml = (st && st.totalScore !== null && st.totalScore !== undefined) ? `
+    <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:12px 16px;margin-bottom:14px">
+      <div style="font-weight:700;color:#6d28d9">🏆 专项总评：${st.totalScore} 分 · ${st.totalLevel}</div>
+      <div style="font-size:12px;color:var(--text-sec);margin-top:4px">总评 = 前 9 场平均分 × 70% + 第 10 场 × 30%</div>
+    </div>` : '';
+
+  const stageOf = e => (statusMap[e.id] && statusMap[e.id].stage) || e.stage || 0;
+  const groups = [
+    { title:'📘 第 1-6 场 · 基础与设备模块（每场 27 题）', list: examsView.filter(e => stageOf(e) >= 1 && stageOf(e) <= 6) },
+    { title:'🧩 第 7-9 场 · 进阶模块（每场 23 题）', list: examsView.filter(e => stageOf(e) >= 7 && stageOf(e) <= 9) },
+    { title:'🏁 第 10 场 · 综合模块（38 题）', list: examsView.filter(e => stageOf(e) >= 10) }
+  ];
+  let sections = '';
+  for (const g of groups){
+    if (g.list.length === 0) continue;
+    sections += `<div class="brand-section"><div class="brand-title">${g.title}</div>${renderExamList(g.list)}</div>`;
+  }
+
+  let html = `
+    ${header}
+    <div class="container">
+      ${reminderBanner(false)}
+      <div style="background:#ede9fe;border:1px solid #c4b5fd;border-radius:10px;padding:12px 16px;margin-bottom:14px">
+        <div style="font-weight:700;color:#6d28d9;margin-bottom:4px">🎧 嗨动音频产品线上知识考核 · 10 场递进式闯关</div>
+        <div style="font-size:13px;color:#5b21b6;line-height:1.7">
+          共 10 场，每场满分 100 分、通过线 <b>80 分</b>；上一场达到 80 分且主观题完成导师评分后，才解锁下一场。<br>
+          总评 = 前 9 场平均分 × 70% + 第 10 场 × 30% ｜ 等级：90 分及以上优秀、80-89 合格、80 分以下待提升。
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <span class="badge badge-audio">已通过 ${passedCount} / 10 场</span>
+        <span class="badge badge-audio">通过线 80 分</span>
+        <span class="badge badge-audio">简答题需导师二次评分</span>
+      </div>
+      ${totalHtml}
+      ${sections}
+      <div style="text-align:center;margin-top:20px;color:var(--text-sec);font-size:13px">
+        每场最多 ${MAX_ATTEMPTS} 次尝试机会 · 每次答题题目与选项顺序随机打乱 · 上一场未通过前下一场保持锁定
+      </div>
+      ${isManager ? `<div style="text-align:center;margin-top:14px"><button class="btn btn-outline" onclick="APP.openSceneScoring()">📝 进入主观题评分管理</button></div>` : ''}
+    </div>`;
+  app.innerHTML = html;
+
+  $$('.exam-item:not(.blocked)').forEach(el => {
+    el.addEventListener('click', () => startExam(el.dataset.examId));
+  });
 }
 
 async function renderScenePanel(app){
