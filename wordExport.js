@@ -239,8 +239,8 @@ function buildDocxXml(opts) {
 
 // ==================== 第二部分：题库归一化 ====================
 
-const TYPE_LABELS = { single: '单选题', multiple: '多选题', judge: '判断题', short: '简答题' };
-const TYPE_ORDER = ['single', 'multiple', 'judge', 'short'];
+const TYPE_LABELS = { single: '单选题', multiple: '多选题', fill: '填空题', judge: '判断题', short: '简答题' };
+const TYPE_ORDER = ['single', 'multiple', 'fill', 'judge', 'short'];
 const CN_NUM = ['一', '二', '三', '四', '五', '六'];
 
 function letterOf(i) { return String.fromCharCode(65 + i); }

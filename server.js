@@ -599,7 +599,18 @@ function shuffle(arr) {
 // 音频专项固定卷：打乱题目顺序 + 打乱单选/多选选项顺序，并同步重映射答案
 function shuffleAudioPaper(questions) {
   const LETTERS = 'ABCDEFGH';
-  const mixed = shuffle(questions).map(q => {
+  // 单场内「组内随机、组间固定」：题型顺序始终为 单选→多选→填空→判断→简答，
+  // 避免每场题序忽单忽简，学员阅读与作答节奏混乱。
+  const byType = {};
+  for (const t of TYPE_ORDER) byType[t] = [];
+  const others = [];
+  for (const q of shuffle(questions)) {
+    const type = q && TYPE_ORDER.includes(q.type) ? q.type : null;
+    if (!type) { others.push(q); continue; }
+    byType[type].push(q);
+  }
+  const ordered = TYPE_ORDER.reduce((arr, t) => arr.concat(byType[t]), []).concat(others);
+  return ordered.map(q => {
     if ((q.type !== 'single' && q.type !== 'multiple') || !Array.isArray(q.options) || q.options.length === 0) return q;
     const entries = q.options.map((text, i) => ({
       text: String(text).replace(new RegExp('^[' + LETTERS + 'Ａ-Ｈ][.、．]\\s*'), '').trim(),
@@ -614,7 +625,6 @@ function shuffleAudioPaper(questions) {
       .sort();
     return { ...q, options, answer: correct.join('') };
   });
-  return mixed;
 }
 
 // ===== 抽题（课目隔离 —— 原则性规则）=====
@@ -1812,6 +1822,35 @@ app.get('/api/audio/status', authMiddleware, async (req, res) => {
   }
 });
 
+// ===== 音频专项 · 导师/管理员试卷预览（不受闯关锁限制；不建会话、不产生答题记录）=====
+app.get('/api/audio/preview', mentorAuth, async (req, res) => {
+  try {
+    const examId = String(req.query.examId || '').trim();
+    const exam = (EXAM_CONFIGS.audio || []).find(e => e.id === examId);
+    if (!exam) return res.status(404).json({ error: '音频专项考试不存在' });
+    const bank = loadQuestions(exam.questionFile);
+    const questions = bank
+      .filter(q => q.examId === exam.examIdFilter)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), 'zh'))
+      .map(q => ({
+        id: q.id, type: q.type, points: q.points, category: q.category,
+        question: q.question, options: q.options, answer: q.answer,
+        explain: q.explain, examineRule: q.examineRule, manual: !!q.manual
+      }));
+    res.json({
+      success: true,
+      exam: {
+        id: exam.id, title: exam.title, stage: exam.stage,
+        duration: exam.duration, totalQuestions: exam.totalQuestions, passScore: exam.passScore
+      },
+      questions
+    });
+  } catch (e) {
+    console.error('[audio/preview] error:', e.message);
+    res.status(500).json({ error: '加载试卷失败：' + e.message });
+  }
+});
+
 app.get('/api/scene/overview', mentorAuth, async (req, res) => {
   try {
     const cfg = (await getModuleConfig());
@@ -2131,6 +2170,8 @@ app.put('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, res
   const updated = req.body;
   const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
+  // 固定整卷（音频/场景等）题量与分值已锁定，禁止改题，避免破坏整卷结构
+  if (exam.fixed) return res.status(403).json({ error: '该专项为固定整卷，题库只读，不支持编辑' });
   const questions = loadQuestions(exam.questionFile);
   const idx = questions.findIndex(q => q.id === questionId);
   if (idx < 0) return res.status(404).json({ error: '题目不存在' });
@@ -2147,6 +2188,7 @@ app.post('/api/mentor/questions/:examId', mentorAuth, async (req, res) => {
   const newQ = req.body;
   const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
+  if (exam.fixed) return res.status(403).json({ error: '该专项为固定整卷，题库只读，不支持新增题目' });
   if (!newQ.id) newQ.id = examId + '_q' + Date.now();
   if (!newQ.points) newQ.points = 5;
   const questions = loadQuestions(exam.questionFile);
@@ -2162,6 +2204,7 @@ app.delete('/api/mentor/questions/:examId/:questionId', mentorAuth, async (req, 
   const { examId, questionId } = req.params;
   const exam = (await getAllExams()).find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
+  if (exam.fixed) return res.status(403).json({ error: '该专项为固定整卷，题库只读，不支持删除题目' });
   const questions = loadQuestions(exam.questionFile);
   const idx = questions.findIndex(q => q.id === questionId);
   if (idx < 0) return res.status(404).json({ error: '题目不存在' });

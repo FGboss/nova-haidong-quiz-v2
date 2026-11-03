@@ -1694,8 +1694,10 @@ function renderQBankContent(){
   const content = $('#mentorContent');
   if (!content || !_qbankData) return;
 
-  // 场景化为固定整卷（5 场共用一份题库、按 examId 分流），不开放这里的增删改，避免误删影响多场考试
-  const panels = getAllModuleIds().filter(p => p !== 'scene' && p !== 'audio');
+  // 固定整卷专项不开放增删改（避免误删导致整卷题量不足），但应可查看与导出。
+  // 场景化 5 场共用一个题库文件；音频专项 10 场各自成卷，均纳入题库管理只读展示。
+  const READONLY_PANELS = ['audio'];
+  const panels = getAllModuleIds().filter(p => p !== 'scene');
   let totalQ = 0;
   for (const p of panels){
     for (const g of (_qbankData.questions[p]||[])){
@@ -1734,12 +1736,13 @@ function renderQBankContent(){
       }
       if (questions.length === 0) continue;
 
+      const readonly = READONLY_PANELS.includes(p);
       html += `<div class="card" style="margin-bottom:12px">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <span>${escapeHtml(g.title)} <span style="font-size:12px;color:var(--text-sec);font-weight:400">（${questions.length}题）</span></span>
+          <span>${escapeHtml(g.title)} <span style="font-size:12px;color:var(--text-sec);font-weight:400">（${questions.length}题）</span>${readonly ? ' <span class="badge badge-audio">固定卷 · 只读</span>' : ''}</span>
           <span style="display:flex;gap:6px;flex-shrink:0">
             <button class="btn btn-sm btn-success" onclick="APP.openExportQuestionBank('${jsEscape(g.examId)}','${jsEscape(g.title)}',${Number(g.examCount) || 0},${Number(g.bankCount) || 0})" title="导出该考试题库为 Word，可线下打印做题">📄 导出Word</button>
-            <button class="btn btn-sm btn-primary" onclick="APP.openAddQuestion('${p}','${g.examId}','${jsEscape(g.title)}')">+ 新增题目</button>
+            ${readonly ? '' : `<button class="btn btn-sm btn-primary" onclick="APP.openAddQuestion('${p}','${g.examId}','${jsEscape(g.title)}')">+ 新增题目</button>`}
           </span>
         </div>
         <div style="max-height:600px;overflow-y:auto">
@@ -1755,11 +1758,12 @@ function renderQBankContent(){
                   <div style="font-weight:600;margin-top:4px">${i+1}. ${escapeHtml(q.question)}</div>
                   ${q.options ? `<div style="font-size:13px;color:var(--text-sec);margin-top:4px">选项：${q.options.map(o => escapeHtml(o)).join(' / ')}</div>` : ''}
                   <div style="font-size:12px;margin-top:4px;color:var(--success)">答案：${q.type==='judge' ? (q.answer==='A'||q.answer===true?'对':'错') : escapeHtml(q.answer||'')} ${q.keywords ? '| 关键词：'+escapeHtml(q.keywords) : ''}</div>
-                  ${q.explanation ? `<div style="font-size:12px;color:var(--text-sec);margin-top:2px">解析：${escapeHtml(q.explanation)}</div>` : ''}
+                  ${(q.explain || q.explanation) ? `<div style="font-size:12px;color:var(--text-sec);margin-top:2px">解析：${escapeHtml(q.explain || q.explanation)}</div>` : ''}
+                  ${q.examineRule ? `<div style="font-size:12px;color:#92400e;margin-top:2px">评分标准：${escapeHtml(q.examineRule)}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:4px;flex-shrink:0">
-                  <button class="btn btn-sm btn-outline" onclick="APP.openEditQuestion('${p}','${g.examId}','${q.id}')">编辑</button>
-                  <button class="btn btn-sm btn-danger" onclick="APP.deleteQuestion('${p}','${g.examId}','${q.id}')">删除</button>
+                  ${readonly ? '' : `<button class="btn btn-sm btn-outline" onclick="APP.openEditQuestion('${p}','${g.examId}','${q.id}')">编辑</button>
+                  <button class="btn btn-sm btn-danger" onclick="APP.deleteQuestion('${p}','${g.examId}','${q.id}')">删除</button>`}
                 </div>
               </div>
             </div>`;
@@ -3342,6 +3346,8 @@ window.APP = {
   openUserEditModal, saveUserEdit, resetMentorStudentPassword,
   // 用户自助改密
   openChangePassModal,
+  // 音频专项试卷预览（导师/管理员）
+  previewAudioExam,
   // Question Bank
   renderMentorQuestionBank, filterQBankPanel, searchQBank,
   openExportQuestionBank, doExportQuestionBank,
@@ -3422,6 +3428,8 @@ async function renderAudioPanel(app){
     const s = statusMap[e.id];
     return s ? { ...e, _locked: !s.unlocked, _status: s.status, _pending: s.pending, _bestScore: s.bestScore } : e;
   });
+  // 导师/管理员：不受闯关锁限制，可任意查看/预览每一场试卷（预览不产生答题记录）
+  if (isManager) examsView.forEach(e => { e._locked = false; e._blocked = false; });
   const passedCount = ((st && st.exams) || []).filter(x => x.qualified).length;
 
   const header = `
@@ -3476,15 +3484,65 @@ async function renderAudioPanel(app){
       ${totalHtml}
       ${sections}
       <div style="text-align:center;margin-top:20px;color:var(--text-sec);font-size:13px">
-        每场最多 ${MAX_ATTEMPTS} 次尝试机会 · 每次答题题目与选项顺序随机打乱 · 上一场未通过前下一场保持锁定
+        ${isManager
+          ? '导师/管理员：点击任意一场即可查看完整题目、答案与评分标准（预览不计成绩、不产生答题记录）'
+          : `每场最多 ${MAX_ATTEMPTS} 次尝试机会 · 每次答题题目与选项顺序随机打乱 · 上一场未通过前下一场保持锁定`}
       </div>
       ${isManager ? `<div style="text-align:center;margin-top:14px"><button class="btn btn-outline" onclick="APP.openSceneScoring()">📝 进入主观题评分管理</button></div>` : ''}
     </div>`;
   app.innerHTML = html;
 
   $$('.exam-item:not(.blocked)').forEach(el => {
-    el.addEventListener('click', () => startExam(el.dataset.examId));
+    el.addEventListener('click', () => isManager ? previewAudioExam(el.dataset.examId) : startExam(el.dataset.examId));
   });
+}
+
+// 导师/管理员试卷预览（只读，不产生答题记录）
+async function previewAudioExam(examId){
+  try{
+    const res = await api(`/api/audio/preview?examId=${encodeURIComponent(examId)}`);
+    if (!res.success){ showToast(res.error || '加载试卷失败', 'error'); return; }
+    const typeColor = { single:'#1e40af', multiple:'#9d174d', fill:'#7c3aed', judge:'#065f46', short:'#92400e' };
+    const qs = res.questions || [];
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal fade-in" style="max-width:900px">
+        <div class="modal-header">
+          <span>👀 ${escapeHtml(res.exam.title)} · 试卷预览</span>
+          <span onclick="this.closest('.modal-overlay').remove()" style="cursor:pointer">✕</span>
+        </div>
+        <div class="modal-body" style="max-height:74vh;overflow-y:auto">
+          <div style="font-size:12px;color:var(--text-sec);margin-bottom:12px">
+            共 ${qs.length} 题 · 满分 100 分 · 通过线 ${res.exam.passScore} 分 · 限时 ${res.exam.duration} 分钟 ｜ 本预览仅供导师检查出题质量，不参与闯关与成绩
+          </div>
+          ${qs.map((q, i) => {
+            const label = TYPE_LABELS[q.type] || q.type;
+            const color = typeColor[q.type] || '#334155';
+            const answerText = q.type === 'judge' ? (q.answer === 'A' ? '正确' : '错误') : escapeHtml(q.answer || '');
+            return `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;background:#fafbfc">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                <div>
+                  <span style="display:inline-block;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;color:${color};background:${color}15;margin-right:6px">${label}</span>
+                  <span style="font-size:12px;color:var(--text-sec)">第 ${i+1} 题 · ${q.points} 分 · ${escapeHtml(q.id)}</span>
+                </div>
+                <span style="font-size:12px;color:var(--success);font-weight:600">答案：${answerText}</span>
+              </div>
+              <div style="font-weight:600;margin-top:6px;white-space:pre-wrap">${escapeHtml(q.question)}</div>
+              ${Array.isArray(q.options) && q.options.length ? `<div style="font-size:13px;color:var(--text-sec);margin-top:6px;line-height:1.8">${q.options.map(o => escapeHtml(o)).join('<br>')}</div>` : ''}
+              ${q.explain ? `<div style="font-size:12px;color:var(--text-sec);margin-top:6px;white-space:pre-wrap">解析：${escapeHtml(q.explain)}</div>` : ''}
+              ${q.examineRule ? `<div style="font-size:12px;color:#92400e;background:#fffbeb;border-radius:6px;padding:6px 8px;margin-top:6px;white-space:pre-wrap">评分标准：${escapeHtml(q.examineRule)}</div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }catch(e){
+    showToast('加载试卷失败：' + e.message, 'error');
+  }
 }
 
 async function renderScenePanel(app){
