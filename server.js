@@ -1184,7 +1184,10 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
   const records = await db.readJSON('records.json');
 
   // ===== 专项模块 · 闯关校验：上一场达到通过线并完成导师评分后，才允许开始本场 =====
-  if (isGatedPanel(exam.panel)) {
+  // 导师/管理员不受闯关锁限制：他们同样要参加考核，也需要逐场检查出题情况，
+  // 但只能走「正常发卷」流程（服务端已剥离答案/解析），答案解析统一到题库管理查看。
+  const isManager = req.currentUser && (req.currentUser.role === 'mentor' || req.currentUser.role === 'admin');
+  if (isGatedPanel(exam.panel) && !isManager) {
     const seq = GATED_EXAM_SEQUENCES[exam.panel];
     const seqIdx = seq.indexOf(examId);
     if (seqIdx > 0) {
@@ -1819,35 +1822,6 @@ app.get('/api/audio/status', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[audio/status] error:', e.message);
     res.status(500).json({ error: '获取闯关状态失败：' + e.message });
-  }
-});
-
-// ===== 音频专项 · 导师/管理员试卷预览（不受闯关锁限制；不建会话、不产生答题记录）=====
-app.get('/api/audio/preview', mentorAuth, async (req, res) => {
-  try {
-    const examId = String(req.query.examId || '').trim();
-    const exam = (EXAM_CONFIGS.audio || []).find(e => e.id === examId);
-    if (!exam) return res.status(404).json({ error: '音频专项考试不存在' });
-    const bank = loadQuestions(exam.questionFile);
-    const questions = bank
-      .filter(q => q.examId === exam.examIdFilter)
-      .sort((a, b) => String(a.id).localeCompare(String(b.id), 'zh'))
-      .map(q => ({
-        id: q.id, type: q.type, points: q.points, category: q.category,
-        question: q.question, options: q.options, answer: q.answer,
-        explain: q.explain, examineRule: q.examineRule, manual: !!q.manual
-      }));
-    res.json({
-      success: true,
-      exam: {
-        id: exam.id, title: exam.title, stage: exam.stage,
-        duration: exam.duration, totalQuestions: exam.totalQuestions, passScore: exam.passScore
-      },
-      questions
-    });
-  } catch (e) {
-    console.error('[audio/preview] error:', e.message);
-    res.status(500).json({ error: '加载试卷失败：' + e.message });
   }
 });
 
