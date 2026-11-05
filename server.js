@@ -353,7 +353,7 @@ function loadQuestions(filePath) {
     // 内存缓存回退（从 Supabase 预加载的）
     if (questionCache.has(filePath)) {
       console.log('[questions] Served from memory cache:', filePath, `(${questionCache.get(filePath).length} questions)`);
-      return questionCache.get(filePath);
+      return normalizeQuestionBank(questionCache.get(filePath));
     }
     console.log('[questions] File not found on disk:', filePath);
     return [];
@@ -362,18 +362,24 @@ function loadQuestions(filePath) {
     const content = fs.readFileSync(fullPath, 'utf8');
     const match = content.match(/const\s+\w+\s*=\s*(\[[\s\S]*\]);?\s*$/m);
     if (match) {
-      const questions = eval(match[1]);
+      const questions = normalizeQuestionBank(eval(match[1]));
       questionCache.set(filePath, questions); // 更新缓存
       return questions;
     }
     const m = content.match(/module\.exports\s*=\s*(\[[\s\S]*\]);?\s*$/m);
     if (m) {
-      const questions = eval(m[1]);
+      const questions = normalizeQuestionBank(eval(m[1]));
       questionCache.set(filePath, questions);
       return questions;
     }
     return [];
   } catch(e) { console.error('[questions] Load error:', filePath, e.message); return []; }
+}
+
+// 题库归一化：简答题缺少 keywords 时补 manual 标记（无自动判分依据，必须导师人工评分）
+function normalizeQuestionBank(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(q => isManualScoredQuestion(q) && !q.manual ? { ...q, manual: true } : q);
 }
 
 // 从 Supabase 预加载所有题库到内存缓存（启动时调用）
@@ -535,7 +541,7 @@ function sceneRecordQualified(r) {
   if (!r || !r.passed) return false;
   if (r.mentorScored) return true;
   const qs = Array.isArray(r.questions) ? r.questions : [];
-  return !qs.some(q => q && q.manual);
+  return !qs.some(isManualScoredQuestion);
 }
 
 // ===== Fisher-Yates 洗牌 =====
@@ -718,6 +724,14 @@ function gradeShortAnswer(answer, keywords, maxPoints) {
   for (const kw of kwList) { if (ans.includes(kw)) matched++; }
   const pts = maxPoints || 10;
   return Math.round((matched / kwList.length) * pts);
+}
+
+// 是否需要导师人工评分：显式 manual 标记，或简答题缺少 keywords（无自动判分依据）。
+// 后者用于兼容历史题库漏标 manual 的情况，避免简答题被当成纯客观题而永久拿 0 分、且无评分入口。
+function isManualScoredQuestion(q) {
+  if (!q) return false;
+  if (q.manual) return true;
+  return q.type === 'short' && !q.keywords;
 }
 
 // ===== 面板中文名 =====
@@ -1346,8 +1360,8 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
       const points = q.points || 5;
       const userAnswer = (recordSafe.answers || {})[q.id];
       let score = 0;
-      // 主观题（简答/配推/情景/大案例，manual=true）不自动评分，由导师人工评分；此处仅登记答题内容
-      if (q.manual) {
+      // 主观题（简答/配推/情景/大案例，manual=true 或简答题无 keywords）不自动评分，由导师人工评分；此处仅登记答题内容
+      if (isManualScoredQuestion(q)) {
         typeScores[qType] = typeScores[qType] || { score: 0, max: 0 };
         typeScores[qType].max += points;
         questionScores[q.id] = { score: 0, maxScore: points, manual: true };
@@ -1389,7 +1403,7 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
     recordSafe.questionScores = questionScores;
     recordSafe.typeScores = typeScores;
     recordSafe.mentorScored = false;
-    recordSafe.mentorPending = isGatedPanel(recordSafe.panel);
+    recordSafe.mentorPending = isGatedPanel(recordSafe.panel) || questions.some(isManualScoredQuestion);
 
     records.push(recordSafe);
     await db.writeRaw('records.json', records);
@@ -1587,7 +1601,7 @@ app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
     const score = (target.finalScore !== undefined && target.finalScore !== null) ? target.finalScore : (target.autoScore || 0);
     target.passScore = line;
     target.passed = Number(score) >= line;
-    if (isGatedPanel(target.panel)) target.mentorPending = !target.mentorScored;
+    if (isGatedPanel(target.panel) || (target.questions || []).some(isManualScoredQuestion)) target.mentorPending = !target.mentorScored;
     await db.writeRaw('records.json', records);
     saved = target;
   });
@@ -1626,7 +1640,7 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
       records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
     }
     records[idx].mentorScored = false;
-    records[idx].mentorPending = isGatedPanel(records[idx].panel);
+    records[idx].mentorPending = isGatedPanel(records[idx].panel) || (records[idx].questions || []).some(isManualScoredQuestion);
     records[idx].mentorScoreDetails = null;
     await db.writeRaw('records.json', records);
     saved = records[idx];
@@ -1876,7 +1890,7 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
       // 单场合格：达到通过线 + 主观题已完成导师评分
       if (sceneRecordQualified(r)) holder.qualified[r.examId] = true;
       // 已交卷但主观题尚未评分 → 标记待评，导师端可直观看到
-      if (!r.mentorScored && Array.isArray(r.questions) && r.questions.some(q => q && q.manual)) holder.pending[r.examId] = true;
+      if (!r.mentorScored && Array.isArray(r.questions) && r.questions.some(isManualScoredQuestion)) holder.pending[r.examId] = true;
       if (!holder.exams[r.examId] || score > holder.exams[r.examId].score) {
         holder.exams[r.examId] = { score, passed: !!r.passed, count: (holder.exams[r.examId] ? holder.exams[r.examId].count : 0) + 1, id: r.id };
       } else if (holder.exams[r.examId]) {
@@ -2542,9 +2556,9 @@ app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
     const answers = r.answers || {};
     const qScores = r.questionScores || {};
     // 未完成导师评分的主观题不计入「错题/薄弱点」，避免把待评分误判为答错
-    const pendingManual = !r.mentorScored && questions.some(q => q && q.manual);
+    const pendingManual = !r.mentorScored && questions.some(isManualScoredQuestion);
     for (const q of questions) {
-      if (pendingManual && q.manual) continue;
+      if (pendingManual && isManualScoredQuestion(q)) continue;
       se.totalQuestions++;
       const qs = qScores[q.id] || {};
       const gotScore = qs.score !== undefined ? qs.score : 0;
@@ -2589,9 +2603,9 @@ app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
     const answers = r.answers || {};
     const qScores = r.questionScores || {};
     // 未完成导师评分的主观题不计入错题，避免待评分记录被统计为薄弱点
-    const pendingManual = !r.mentorScored && questions.some(q => q && q.manual);
+    const pendingManual = !r.mentorScored && questions.some(isManualScoredQuestion);
     for (const q of questions) {
-      if (pendingManual && q.manual) continue;
+      if (pendingManual && isManualScoredQuestion(q)) continue;
       const qs = qScores[q.id] || {};
       const gotScore = qs.score !== undefined ? qs.score : 0;
       const maxScore = qs.maxScore || q.points || 5;

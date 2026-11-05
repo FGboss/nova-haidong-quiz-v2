@@ -1172,7 +1172,7 @@ async function viewMyRecords(){
                 <div>
                   ${(() => { const t = getScoreTag(score, passLineOf(r)); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
                   <span class="badge ${t.cls}" style="margin-left:8px">${t.label}</span>
-                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${(!r.mentorScored && (r.questions||[]).some(q => q.manual)) ? '⏳待导师评分' : (r.passed ? '✅通过' : '❌未通过')}</span>`; })()}
+                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${(!r.mentorScored && (r.questions||[]).some(isManualScoredQuestion)) ? '⏳待导师评分' : (r.passed ? '✅通过' : '❌未通过')}</span>`; })()}
                   ${r.mentorScored ? '<span class="badge badge-success" style="margin-left:4px">已评</span>' : ''}
                 </div>
               </div>
@@ -1233,7 +1233,7 @@ function showRecordDetailModal(record){
               ${q.answer ? `<span style="margin-left:8px;color:var(--text-sec)">正确答案：</span>${escapeHtml(q.answer)}` : ''}
             </div>
             <div style="font-size:12px;margin-top:2px">
-              ${(q.manual && !record.mentorScored)
+              ${(isManualScoredQuestion(q) && !record.mentorScored)
                 ? `<span style="color:var(--warning);font-weight:600">⏳ 主观题待导师评分（满分 ${maxScore} 分）</span>`
                 : `<span class="${isCorrect ? 'answer-correct' : 'answer-wrong'}">得分：${gotScore}/${maxScore}</span>`}
             </div>
@@ -1585,9 +1585,15 @@ function exportRecords(){
 }
 
 // ===== 评分管理 =====
-// 是否需要导师人工评分：卷内含 manual 主观题（客观题卷提交即完成，无需评分）
+// 是否需要导师人工评分：卷内含主观题——显式 manual，或简答题缺少 keywords（无自动判分依据）。
+// 兼容历史记录：老题库简答题未标 manual 且无 keywords，提交时被当成客观题，导致没有评分入口。
+function isManualScoredQuestion(q){
+  if (!q) return false;
+  if (q.manual) return true;
+  return q.type === 'short' && !q.keywords;
+}
 function needsMentorScoring(r){
-  return !!(r && Array.isArray(r.questions) && r.questions.some(q => q && q.manual));
+  return !!(r && Array.isArray(r.questions) && r.questions.some(isManualScoredQuestion));
 }
 
 function renderMentorScoring(){
@@ -2171,7 +2177,7 @@ async function viewRecordDetail(recordId){
 async function openScoringDetail(recordId){
   const record = state.mentorRecords.find(r => r.id === recordId);
   if (!record) return;
-  const questions = (record.questions||[]).filter(q => q.manual);
+  const questions = (record.questions||[]).filter(isManualScoredQuestion);
   if (questions.length === 0){ showToast('该卷无需导师评分','info'); return; }
   const answers = record.answers || {};
   const mentorDetails = record.mentorScoreDetails || {};
@@ -2248,7 +2254,7 @@ async function openScoringDetail(recordId){
 async function saveMentorScore(recordId){
   const record = state.mentorRecords.find(r => r.id === recordId);
   if (!record) return;
-  const questions = (record.questions||[]).filter(q => q.manual);
+  const questions = (record.questions||[]).filter(isManualScoredQuestion);
   let mentorScoreDetails = {};
   let shortScore = 0, shortMax = 0;
   const typeScores = record.typeScores || {};
