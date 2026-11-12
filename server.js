@@ -47,6 +47,80 @@ const TYPE_ORDER = ['single', 'multiple', 'fill', 'judge', 'short'];
 // ===== 数据持久化：Supabase PostgreSQL =====
 const db = require('./db');
 
+// ===== 答题记录：进程内权威表 + 合并写回 =====
+// records.json 是「整表单行」存储，单次读写体积随记录数线性增长（1200 条约 9MB）。
+// 若每次提交都「全量读 → 全量写」，高峰期多人同时交卷会排队几十秒，前端表现为一直转圈。
+// 现在的策略：
+//   - 记录常驻内存，作为唯一权威数据；读接口直接读内存（毫秒级）
+//   - 所有写操作只改内存，标记 dirty 后合并写回数据库（200ms 合并窗口，N 次提交只落 1 次盘）
+//   - 提交接口不再需要全局锁：Node 单线程下「查重 + push」是原子的，天然防并发重复写入
+//   - 进程退出前强制 flush，避免丢数据
+// 注意：该模型要求单实例部署（当前 Render 就是一个实例）。若未来多实例，需要改为数据库侧原子写。
+const RECORDS_KEY = 'records.json';
+let _records = null;
+let _recordsLoading = null;
+let _recordsDirty = false;
+let _recordsFlushing = false;
+let _recordsTimer = null;
+
+async function readRecordsCached() {
+  if (_records) return _records;
+  if (!_recordsLoading) {
+    _recordsLoading = db.readJSONRaw(RECORDS_KEY)
+      .then(rows => { _records = Array.isArray(rows) ? rows : []; return _records; })
+      .finally(() => { _recordsLoading = null; });
+  }
+  return _recordsLoading;
+}
+function markRecordsDirty() {
+  _recordsDirty = true;
+  if (_recordsTimer) return;
+  _recordsTimer = setTimeout(() => { _recordsTimer = null; flushRecords(); }, 200);
+}
+async function flushRecords() {
+  if (!_recordsDirty || !_records) return;
+  if (_recordsFlushing) { markRecordsDirty(); return; }
+  _recordsFlushing = true;
+  _recordsDirty = false;
+  try {
+    await db.writeRaw(RECORDS_KEY, _records);
+  } catch (e) {
+    _recordsDirty = true;
+    console.error('[records] flush failed:', e.message);
+    setTimeout(() => flushRecords(), 1000);
+  } finally {
+    _recordsFlushing = false;
+  }
+}
+// 进程退出前落盘（Render 重启/发版时保证未落盘的记录不丢）
+async function flushRecordsOnExit(signal) {
+  const deadline = Date.now() + 5000;
+  try {
+    while (_recordsDirty || _recordsFlushing) {
+      if (Date.now() > deadline) break;
+      if (_recordsFlushing) { await new Promise(r => setTimeout(r, 50)); continue; }
+      await flushRecords();
+    }
+  } catch (e) {}
+  if (signal) process.exit(0);
+}
+process.on('SIGTERM', () => flushRecordsOnExit('SIGTERM'));
+process.on('SIGINT', () => flushRecordsOnExit('SIGINT'));
+// 记录摘要：题目快照单条 5~12KB，列表/统计场景不需要，避免一次返回十几 MB
+function recordSummary(r) {
+  const qs = Array.isArray(r.questions) ? r.questions : [];
+  const manualCount = qs.filter(isManualScoredQuestion).length;
+  return {
+    id: r.id, studentName: r.studentName, examId: r.examId, examTitle: r.examTitle,
+    panel: r.panel, attemptNumber: r.attemptNumber, submitTime: r.submitTime,
+    autoScore: r.autoScore, mentorScore: r.mentorScore, finalScore: r.finalScore,
+    passScore: r.passScore, passed: r.passed, mentorScored: r.mentorScored,
+    mentorPending: r.mentorPending, timeSpent: r.timeSpent,
+    manualCount, needsScoring: manualCount > 0,
+    aiCheck: r.aiCheck, typeScores: r.typeScores, mentorComment: r.mentorComment
+  };
+}
+
 // ===== AI 倾向检测（本地多维，可解释，供导师参考） =====
 const aiDetect = require('./aiDetect');
 
@@ -326,14 +400,12 @@ function applyUserEdit(oldUsername, patch, editor) {
 
       // 第 3 步：records.json（学员改名时把历史答题记录同步改归属，避免"记录消失"）
       if (migrateName) {
-        await db.withLock('records.json', async () => {
-          const records = await db.readJSONRaw('records.json');
-          let changed = false;
-          for (const r of records) {
-            if (r.studentName === migrateName.from) { r.studentName = migrateName.to; changed = true; }
-          }
-          if (changed) await db.writeRaw('records.json', records);
-        });
+        const records = await readRecordsCached();
+        let changed = false;
+        for (const r of records) {
+          if (r.studentName === migrateName.from) { r.studentName = migrateName.to; changed = true; }
+        }
+        if (changed) markRecordsDirty();
       }
 
       resolve(result);
@@ -1046,7 +1118,7 @@ app.put('/api/mentor/students/:username', mentorAuth, async (req, res) => {
 // 积分规则：每场考试取最高分，>=90 得3分，80-89 得2分，<80 得1分
 // 徽章规则：满分学霸(100分) / 高分达人(>=95) / 首战告捷(首次通过) / 稳定发挥(通过>=3场) / 多面手(>=3个板块)
 app.get('/api/leaderboard', authMiddleware, async (req, res) => {
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const users = await db.readObj('users.json');
   const panels = await getAllPanels();
   const config = await getModuleConfig();
@@ -1167,9 +1239,10 @@ app.get('/api/records/:studentName', authMiddleware, async (req, res) => {
   if (me.name !== req.params.studentName && me.role !== 'mentor' && me.role !== 'admin') {
     return res.status(403).json({ error: '无权查看该学员记录' });
   }
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
-  res.json({ success: true, records: studentRecords });
+  // 只回传摘要：题目快照体积大，详情由 /api/mentor/records/:id 按需获取
+  res.json({ success: true, records: studentRecords.map(recordSummary) });
 });
 
 app.get('/api/attempts/:studentName', authMiddleware, async (req, res) => {
@@ -1177,7 +1250,7 @@ app.get('/api/attempts/:studentName', authMiddleware, async (req, res) => {
   if (me.name !== req.params.studentName && me.role !== 'mentor' && me.role !== 'admin') {
     return res.status(403).json({ error: '无权查看该学员记录' });
   }
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const attempts = {};
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
   for (const r of studentRecords) attempts[r.examId] = (attempts[r.examId] || 0) + 1;
@@ -1195,7 +1268,7 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
   const exam = allExams.find(e => e.id === examId);
   if (!exam) return res.status(404).json({ error: '考试不存在' });
 
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
 
   // ===== 专项模块 · 闯关校验：上一场达到通过线并完成导师评分后，才允许开始本场 =====
   // 导师/管理员不受闯关锁限制：他们同样要参加考核，也需要逐场检查出题情况，
@@ -1312,30 +1385,58 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
   await loadExamSessions();
   const session = examSessions.get(body.sessionId);
   if (!session) return res.status(400).json({ error: '试卷会话不存在，请重新开始考试' });
-  if (session.used) return res.status(400).json({ error: '该试卷已提交过，请勿重复提交' });
+  if (session.used) {
+    // 已经提交过：直接返回已有记录（幂等），避免「超时后重试」的学员看到报错又反复点击
+    const existing = (await readRecordsCached()).find(r => r.sessionId === body.sessionId);
+    if (existing) return res.json({ success: true, record: existing, deduped: true });
+    return res.status(400).json({ error: '该试卷已提交过，请勿重复提交' });
+  }
   if (session.expiresAt < Date.now()) return res.status(400).json({ error: '试卷已超时，请重新开始考试' });
   if (session.studentName !== studentName) return res.status(403).json({ error: '身份校验失败' });
   if (session.examId !== body.examId) return res.status(400).json({ error: '考试不匹配，请重新开始' });
 
   const seed = { ...body, studentName };
-  let record = null;
-  // 整段「读-改-写」加锁：防止多人同时提交时互相覆盖丢记录
   let savedRecord = null;
   let dupResult = null;
-  await db.withLock('records.json', async () => {
-    const records = await db.readJSONRaw('records.json');
 
-    if (seed.id) {
-      const dupId = records.find(r => r.id === seed.id);
-      if (dupId) { console.log('[dedup] ID duplicate'); dupResult = { record: dupId, deduped: true }; return; }
-    }
+  // 读内存权威表（毫秒级）；随后的「查重 → push」之间不再有 await，
+  // Node 单线程下这段是原子的，因此不需要全局锁也不会并发重复写入。
+  const records = await readRecordsCached();
+  const examCfg = (await getAllExams()).find(e => e.id === seed.examId);
 
-    const dupTime = records.find(r =>
+  // ===== 幂等保护（防并发/超时重试产生重复记录）=====
+  // 同一 sessionId 永远只允许一条记录
+  let dupSession = null;
+  let dupClient = null;
+  let dupId = null;
+  let dupTime = null;
+  if (seed.sessionId) dupSession = records.find(r => r.sessionId && r.sessionId === seed.sessionId);
+  if (dupSession) {
+    console.log('[dedup] session duplicate');
+    session.used = true;
+    dupResult = { record: dupSession, deduped: true };
+  }
+  if (!dupResult && seed.clientSubmitId) {
+    dupClient = records.find(r => r.clientSubmitId === seed.clientSubmitId);
+    if (dupClient) { console.log('[dedup] clientSubmitId duplicate'); dupResult = { record: dupClient, deduped: true }; }
+  }
+  if (!dupResult && seed.id) {
+    dupId = records.find(r => r.id === seed.id);
+    if (dupId) { console.log('[dedup] ID duplicate'); dupResult = { record: dupId, deduped: true }; }
+  }
+  if (!dupResult) {
+    dupTime = records.find(r =>
       r.studentName === studentName && r.examId === seed.examId &&
       Math.abs(new Date(r.submitTime).getTime() - new Date(seed.submitTime).getTime()) < 5000
     );
-    if (dupTime) { console.log('[dedup] Time duplicate'); dupResult = { record: dupTime, deduped: true }; return; }
+    if (dupTime) { console.log('[dedup] Time duplicate'); dupResult = { record: dupTime, deduped: true }; }
+  }
+  if (session.used && !dupResult) {
+    // 会话标记已用但记录不存在（极小概率的写失败），允许补写
+    session.used = false;
+  }
 
+  if (!dupResult) {
     // 以会话内权威题目为准（含 answer/explain/keywords），服务端重新判分，不信任客户端任何分数
     const questions = session.questions || [];
     const recordSafe = { ...seed };
@@ -1394,7 +1495,6 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
     recordSafe.autoScore = autoScore;
     recordSafe.finalScore = autoScore;
     // 板块归属以服务端考试配置为准，不信任客户端传入的 panel
-    const examCfg = (await getAllExams()).find(e => e.id === recordSafe.examId);
     recordSafe.panel = examCfg ? examCfg.panel : (recordSafe.panel || 'newbie');
     // 固定整卷按该卷通过线判定；其余沿用全局通过线
     const passLine = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
@@ -1406,11 +1506,13 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
     recordSafe.mentorPending = isGatedPanel(recordSafe.panel) || questions.some(isManualScoredQuestion);
 
     records.push(recordSafe);
-    await db.writeRaw('records.json', records);
+    markRecordsDirty(); // 合并写回，提交响应不必等落盘
     session.used = true; // 标记会话已使用，防止同一试卷会话重复提交
     savedRecord = recordSafe;
-  });
-  await persistExamSessions(); // 持久化会话已使用状态
+  }
+  // 会话状态持久化不阻塞响应：它只是一次「防重复提交」的兜底记录，
+  // 提前返回可让学员少等一次全量会话写库。
+  persistExamSessions().catch(e => console.error('[session] persist error:', e.message));
 
   if (dupResult) return res.json({ success: true, ...dupResult });
   if (savedRecord) {
@@ -1441,7 +1543,7 @@ app.get('/api/mentor/students', mentorAuth, async (req, res) => {
 
 // 获取答题记录（导师看自己学员的，管理员看全部）
 app.get('/api/mentor/records', mentorAuth, async (req, res) => {
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const { search, panel, student, exam } = req.query;
   let filtered = records;
   
@@ -1484,15 +1586,14 @@ app.get('/api/mentor/records', mentorAuth, async (req, res) => {
     );
   }
   
-  // 附加考试标题（不改底层数据，仅响应时补充，方便导师识别）
-  filtered = filtered.map(r => ({ ...r, examTitle: examTextOf(r) }));
-  
-  res.json({ success: true, records: filtered, total: filtered.length });
+  // 附加考试标题 + 只回传摘要：避免列表一次返回十几 MB 题目快照
+  const summaries = filtered.map(r => recordSummary({ ...r, examTitle: examTextOf(r) }));
+  res.json({ success: true, records: summaries, total: summaries.length });
 });
 
 // 导出 CSV
 app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   let filtered = records;
   
   if (req.currentUser.role !== 'admin') {
@@ -1557,7 +1658,7 @@ app.get('/api/mentor/records/export', mentorAuth, async (req, res) => {
 
 // 学生查看自己的答题记录
 app.get('/api/student/records', authMiddleware, async (req, res) => {
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const studentName = req.currentUser.name;
   let filtered = records.filter(r => r.studentName === studentName);
   // 按时间倒序
@@ -1570,7 +1671,7 @@ app.get('/api/student/records', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const record = records.find(r => r.id === req.params.id);
   if (!record) return res.status(404).json({ error: '记录不存在' });
   // 附加考试标题
@@ -1582,31 +1683,27 @@ app.get('/api/mentor/records/:id', mentorAuth, async (req, res) => {
 
 app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   const { mentorScore, finalScore, mentorScored, mentorScoreDetails, questionScores, typeScores, mentorComment } = req.body;
-  let saved = null;
-  await db.withLock('records.json', async () => {
-    const records = await db.readJSONRaw('records.json');
-    const idx = records.findIndex(r => r.id === req.params.id);
-    if (idx < 0) return;
-    const target = records[idx];
-    if (mentorScore !== undefined) target.mentorScore = mentorScore;
-    if (finalScore !== undefined) target.finalScore = finalScore;
-    if (mentorScored !== undefined) target.mentorScored = !!mentorScored;
-    if (mentorScoreDetails !== undefined) target.mentorScoreDetails = mentorScoreDetails;
-    if (questionScores !== undefined) target.questionScores = questionScores;
-    if (typeScores !== undefined) target.typeScores = typeScores;
-    if (mentorComment !== undefined) target.mentorComment = String(mentorComment).slice(0, 2000);
-    // 通过线由服务端按该场考试配置判定（场景化固定卷为 80 分），不信任客户端传入的 passed
-    const examCfg = (await getAllExams()).find(e => e.id === target.examId);
-    const line = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
-    const score = (target.finalScore !== undefined && target.finalScore !== null) ? target.finalScore : (target.autoScore || 0);
-    target.passScore = line;
-    target.passed = Number(score) >= line;
-    if (isGatedPanel(target.panel) || (target.questions || []).some(isManualScoredQuestion)) target.mentorPending = !target.mentorScored;
-    await db.writeRaw('records.json', records);
-    saved = target;
-  });
-  if (!saved) return res.status(404).json({ error: '记录不存在' });
-  res.json({ success: true, record: saved });
+  const records = await readRecordsCached();
+  const allExams = await getAllExams();
+  const idx = records.findIndex(r => r.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: '记录不存在' });
+  const target = records[idx];
+  if (mentorScore !== undefined) target.mentorScore = mentorScore;
+  if (finalScore !== undefined) target.finalScore = finalScore;
+  if (mentorScored !== undefined) target.mentorScored = !!mentorScored;
+  if (mentorScoreDetails !== undefined) target.mentorScoreDetails = mentorScoreDetails;
+  if (questionScores !== undefined) target.questionScores = questionScores;
+  if (typeScores !== undefined) target.typeScores = typeScores;
+  if (mentorComment !== undefined) target.mentorComment = String(mentorComment).slice(0, 2000);
+  // 通过线由服务端按该场考试配置判定（场景化固定卷为 80 分），不信任客户端传入的 passed
+  const examCfg = allExams.find(e => e.id === target.examId);
+  const line = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
+  const score = (target.finalScore !== undefined && target.finalScore !== null) ? target.finalScore : (target.autoScore || 0);
+  target.passScore = line;
+  target.passed = Number(score) >= line;
+  if (isGatedPanel(target.panel) || (target.questions || []).some(isManualScoredQuestion)) target.mentorPending = !target.mentorScored;
+  markRecordsDirty();
+  res.json({ success: true, record: target });
 });
 
 // ===== 管理端：安全/访问日志（导师/管理员可查，用于追溯爬虫与异常访问） =====
@@ -1624,50 +1721,42 @@ app.get('/api/admin/security/logs', mentorAuth, async (req, res) => {
 });
 
 app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
-  let saved = null;
-  await db.withLock('records.json', async () => {
-    const records = await db.readJSONRaw('records.json');
-    const idx = records.findIndex(r => r.id === req.params.id);
-    if (idx < 0) return;
-    records[idx].mentorScore = null;
-    records[idx].finalScore = records[idx].autoScore;
-    // 撤销评分后：闯关式固定卷（场景化/音频）按该卷通过线重判，其余沿用全局通过线
-    if (isGatedPanel(records[idx].panel)) {
-      const examCfg = (await getAllExams()).find(e => e.id === records[idx].examId);
-      records[idx].passScore = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
-      records[idx].passed = records[idx].autoScore >= records[idx].passScore;
-    } else {
-      records[idx].passed = records[idx].autoScore >= PASSING_SCORE;
-    }
-    records[idx].mentorScored = false;
-    records[idx].mentorPending = isGatedPanel(records[idx].panel) || (records[idx].questions || []).some(isManualScoredQuestion);
-    records[idx].mentorScoreDetails = null;
-    await db.writeRaw('records.json', records);
-    saved = records[idx];
-  });
-  if (!saved) return res.status(404).json({ error: '记录不存在' });
-  res.json({ success: true, record: saved });
+  const records = await readRecordsCached();
+  const allExams = await getAllExams();
+  const idx = records.findIndex(r => r.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: '记录不存在' });
+  const target = records[idx];
+  target.mentorScore = null;
+  target.finalScore = target.autoScore;
+  // 撤销评分后：闯关式固定卷（场景化/音频）按该卷通过线重判，其余沿用全局通过线
+  if (isGatedPanel(target.panel)) {
+    const examCfg = allExams.find(e => e.id === target.examId);
+    target.passScore = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
+    target.passed = target.autoScore >= target.passScore;
+  } else {
+    target.passed = target.autoScore >= PASSING_SCORE;
+  }
+  target.mentorScored = false;
+  target.mentorPending = isGatedPanel(target.panel) || (target.questions || []).some(isManualScoredQuestion);
+  target.mentorScoreDetails = null;
+  markRecordsDirty();
+  res.json({ success: true, record: target });
 });
 
 app.delete('/api/mentor/records/:id', mentorAuth, async (req, res) => {
-  let deleted = null;
-  await db.withLock('records.json', async () => {
-    const records = await db.readJSONRaw('records.json');
-    const idx = records.findIndex(r => r.id === req.params.id);
-    if (idx < 0) return;
-    deleted = records.splice(idx, 1)[0];
-    await db.writeRaw('records.json', records);
-  });
-  if (!deleted) return res.status(404).json({ error: '记录不存在' });
+  const records = await readRecordsCached();
+  const idx = records.findIndex(r => r.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: '记录不存在' });
+  const deleted = records.splice(idx, 1)[0];
+  markRecordsDirty();
   res.json({ success: true, deleted });
 });
 
 app.delete('/api/mentor/records', mentorAuth, async (req, res) => {
-  let count = 0;
-  await db.withLock('records.json', async () => {
-    count = (await db.readJSONRaw('records.json')).length;
-    await db.writeRaw('records.json', []);
-  });
+  const records = await readRecordsCached();
+  const count = records.length;
+  records.length = 0;
+  markRecordsDirty();
   res.json({ success: true, deletedCount: count });
 });
 
@@ -1726,7 +1815,7 @@ app.get('/api/scene/status', authMiddleware, async (req, res) => {
   try {
     const studentName = req.currentUser ? req.currentUser.name : '';
     if (!studentName) return res.status(401).json({ error: '未登录' });
-    const records = await db.readJSON('records.json');
+    const records = await readRecordsCached();
     const mine = records.filter(r => r.studentName === studentName && SCENE_EXAM_SEQUENCE.includes(r.examId));
 
     const exams = [];
@@ -1777,7 +1866,7 @@ app.get('/api/audio/status', authMiddleware, async (req, res) => {
   try {
     const studentName = req.currentUser ? req.currentUser.name : '';
     if (!studentName) return res.status(401).json({ error: '未登录' });
-    const records = await db.readJSON('records.json');
+    const records = await readRecordsCached();
     const mine = records.filter(r => r.studentName === studentName && AUDIO_EXAM_SEQUENCE.includes(r.examId));
 
     const exams = [];
@@ -1843,7 +1932,7 @@ app.get('/api/scene/overview', mentorAuth, async (req, res) => {
   try {
     const cfg = (await getModuleConfig());
     const users = await db.readObj('users.json');
-    const records = await db.readJSON('records.json');
+    const records = await readRecordsCached();
     const progress = await getSceneProgress();
 
     // 任务卡列表（合并状态）
@@ -2531,7 +2620,7 @@ app.put('/api/admin/modules/:moduleId', mentorAuth, async (req, res) => {
 
 app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
   const studentName = req.query.student;
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   let filtered = records;
   
   if (req.currentUser.role !== 'admin') {
@@ -2595,7 +2684,7 @@ app.get('/api/mentor/weak-areas', mentorAuth, async (req, res) => {
 });
 
 app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
-  const records = await db.readJSON('records.json');
+  const records = await readRecordsCached();
   const studentRecords = records.filter(r => r.studentName === req.params.studentName);
   const allWrong = [];
   for (const r of studentRecords) {
@@ -2628,17 +2717,16 @@ app.get('/api/mentor/weak-areas/:studentName', mentorAuth, async (req, res) => {
 // 重置学员尝试次数
 app.post('/api/mentor/reset-attempts', mentorAuth, async (req, res) => {
   const { studentName, examId } = req.body;
-  let removedCount = 0;
-  await db.withLock('records.json', async () => {
-    const records = await db.readJSONRaw('records.json');
-    const remaining = records.filter(r => {
-      if (studentName && r.studentName !== studentName) return true;
-      if (examId && r.examId !== examId) return true;
-      removedCount++;
-      return false;
-    });
-    await db.writeRaw('records.json', remaining);
+  const records = await readRecordsCached();
+  const remaining = records.filter(r => {
+    if (studentName && r.studentName !== studentName) return true;
+    if (examId && r.examId !== examId) return true;
+    return false;
   });
+  const removedCount = records.length - remaining.length;
+  records.length = 0;
+  records.push(...remaining);
+  markRecordsDirty();
   res.json({ success: true, removedCount });
 });
 
@@ -2710,6 +2798,8 @@ const PORT = process.env.PORT || 3000;
   await initModuleConfig();
   await preloadQuestionCache();   // 从 Supabase 预加载题库到内存缓存
   await restoreQuestionsFromSupabase(); // 恢复本地文件
+  // 启动时就把答题记录拉进内存：否则重启后第一个访问者要为整表读取等 1s 左右
+  try { await readRecordsCached(); } catch (e) { console.error('[records] preload failed:', e.message); }
   
   app.listen(PORT, () => {
     console.log(`[server] Quiz System V3 running on port ${PORT}`);

@@ -760,6 +760,7 @@ async function startExam(examId){
   state.quizTimeLeft = res.timeLimit;
   state.page = 'quiz';
   state._submitting = false;
+  state._submitPayload = null; // 新一场考试，重置提交幂等载荷
   render();
   startTimer();
 }
@@ -927,40 +928,77 @@ async function submitQuiz(){
   state._submitting = true;
   clearInterval(state.quizTimer);
 
-  // 提交中状态：按钮禁用 + 显示进度，防止无反馈误判
+  // 提交中状态：按钮禁用 + 计时反馈，防止无反馈误判
   const btn = document.getElementById('submitBtn');
+  const startedAt = Date.now();
+  const paintBtn = () => {
+    if (!btn) return;
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    btn.textContent = s > 3 ? `⏳ 提交中 ${s}s…（请勿重复点击）` : '⏳ 提交中…';
+  };
   if (btn){
     btn.disabled = true;
-    btn.textContent = '⏳ 提交中…';
+    paintBtn();
     btn.style.opacity = '0.7';
   }
+  const tick = setInterval(paintBtn, 1000);
 
-  const record = {
-    studentName: state.currentUser.name,
-    examId: state.currentExam.id,
-    panel: state.panel,
-    sessionId: state.sessionId, // 服务端发卷会话，判分以会话内权威题为准，客户端不再回传题目/答案
-    questions: [], // 不再回传题目，服务端用会话取权威题判分，杜绝篡改
-    answers: state.answers,
-    attemptNumber: state.attemptNumber,
-    submitTime: new Date().toISOString(),
-    timeSpent: (state.currentExam.duration * 60) - state.quizTimeLeft
-  };
+  // 幂等载荷：同一份答卷的重试必须完全一致（submitTime / clientSubmitId 固定），
+  // 服务端据此识别重复提交，绝不会产生第二条记录。
+  if (!state._submitPayload){
+    state._submitPayload = {
+      studentName: state.currentUser.name,
+      examId: state.currentExam.id,
+      panel: state.panel,
+      sessionId: state.sessionId, // 服务端发卷会话，判分以会话内权威题为准，客户端不再回传题目/答案
+      questions: [], // 不再回传题目，服务端用会话取权威题判分，杜绝篡改
+      answers: state.answers,
+      attemptNumber: state.attemptNumber,
+      submitTime: new Date().toISOString(),
+      clientSubmitId: state.sessionId || ('c_' + Date.now().toString(36)),
+      timeSpent: (state.currentExam.duration * 60) - state.quizTimeLeft
+    };
+  }
 
   try {
     // 提交走长超时(60s)：同场多人同时提交时后端按序排队写库，避免排队导致前端误判超时
-    const res = await api('/api/records', { method:'POST', body:JSON.stringify(record), timeout: 60000 });
-    if (res.success){
+    let res = await api('/api/records', { method:'POST', body:JSON.stringify(state._submitPayload), timeout: 60000 });
+    if (res && res.success){
       state.lastRecord = res.record;
+      state._submitPayload = null;
       state.page = 'result';
       render();
-    } else {
-      showToast(res.error || '提交失败，请重试','error');
+      return;
     }
+    // 超时/网络异常时自动重试一次：服务端按 sessionId 幂等，重试只会取回已落库的记录
+    if (!res || !res.success){
+      try {
+        res = await api('/api/records', { method:'POST', body:JSON.stringify(state._submitPayload), timeout: 60000 });
+      } catch(e2){ res = null; }
+      if (res && res.success){
+        state.lastRecord = res.record;
+        state._submitPayload = null;
+        state.page = 'result';
+        render();
+        return;
+      }
+    }
+    showToast((res && res.error) || '提交未完成，请再点一次（不会重复计分）','error');
   } catch(e){
-    // 答案保留在 state.answers 中，提示可重试
-    showToast('网络超时，提交未完成，请点击重试','error');
+    // 网络中断也要再确认一次：可能服务端已写入，重试会直接取回该记录
+    try {
+      const res = await api('/api/records', { method:'POST', body:JSON.stringify(state._submitPayload), timeout: 60000 });
+      if (res && res.success){
+        state.lastRecord = res.record;
+        state._submitPayload = null;
+        state.page = 'result';
+        render();
+        return;
+      }
+    } catch(e2){}
+    showToast('网络超时，提交未完成，请点击重试（不会重复计分）','error');
   } finally {
+    clearInterval(tick);
     state._submitting = false; // 锁必然释放，永不卡死
     if (btn && state.page !== 'result'){
       btn.disabled = false;
@@ -1172,7 +1210,7 @@ async function viewMyRecords(){
                 <div>
                   ${(() => { const t = getScoreTag(score, passLineOf(r)); return `<span style="font-weight:700;font-size:18px;color:${t.color}">${score}分</span>
                   <span class="badge ${t.cls}" style="margin-left:8px">${t.label}</span>
-                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${(!r.mentorScored && (r.questions||[]).some(isManualScoredQuestion)) ? '⏳待导师评分' : (r.passed ? '✅通过' : '❌未通过')}</span>`; })()}
+                  <span style="font-size:12px;color:var(--text-sec);margin-left:4px">${(needsMentorScoring(r) && !r.mentorScored) ? '⏳待导师评分' : (r.passed ? '✅通过' : '❌未通过')}</span>`; })()}
                   ${r.mentorScored ? '<span class="badge badge-success" style="margin-left:4px">已评</span>' : ''}
                 </div>
               </div>
@@ -1593,7 +1631,11 @@ function isManualScoredQuestion(q){
   return q.type === 'short' && !q.keywords;
 }
 function needsMentorScoring(r){
-  return !!(r && Array.isArray(r.questions) && r.questions.some(isManualScoredQuestion));
+  if (!r) return false;
+  // 列表接口只返回摘要（不含题目快照），以服务端算好的 manualCount 为准
+  if (typeof r.needsScoring === 'boolean') return r.needsScoring;
+  if (typeof r.manualCount === 'number') return r.manualCount > 0;
+  return Array.isArray(r.questions) && r.questions.some(isManualScoredQuestion);
 }
 
 function renderMentorScoring(){
@@ -2169,14 +2211,24 @@ async function viewStudentWeakDetail(studentName){
 
 // ===== 评分操作 =====
 async function viewRecordDetail(recordId){
-  const record = state.mentorRecords.find(r => r.id === recordId);
-  if (!record){ showToast('记录不存在','error'); return; }
-  showRecordDetailModal(record);
+  // 列表只带摘要，详情按需拉取（避免列表一次传输全部题目）
+  try {
+    const res = await api(`/api/mentor/records/${recordId}`);
+    if (!res.success || !res.record){ showToast('记录不存在','error'); return; }
+    showRecordDetailModal(res.record);
+  } catch(e){ showToast('加载失败，请重试','error'); }
 }
 
 async function openScoringDetail(recordId){
-  const record = state.mentorRecords.find(r => r.id === recordId);
-  if (!record) return;
+  let record = state.mentorRecords.find(r => r.id === recordId);
+  // 评分需要完整题目快照，列表摘要里没有，按需拉取
+  if (!record || !Array.isArray(record.questions)) {
+    try {
+      const res = await api(`/api/mentor/records/${recordId}`);
+      if (!res.success || !res.record){ showToast('记录不存在','error'); return; }
+      record = res.record;
+    } catch(e){ showToast('加载失败，请重试','error'); return; }
+  }
   const questions = (record.questions||[]).filter(isManualScoredQuestion);
   if (questions.length === 0){ showToast('该卷无需导师评分','info'); return; }
   const answers = record.answers || {};
