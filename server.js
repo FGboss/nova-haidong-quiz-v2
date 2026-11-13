@@ -83,7 +83,13 @@ async function flushRecords() {
   _recordsFlushing = true;
   _recordsDirty = false;
   try {
-    await db.writeRaw(RECORDS_KEY, _records);
+    const ok = await db.writeRaw(RECORDS_KEY, _records);
+    if (ok === false) {
+      // 写库失败（网络/限流）不能当作已落盘，标记 dirty 后延迟重试
+      _recordsDirty = true;
+      console.error('[records] flush returned false, will retry');
+      setTimeout(() => flushRecords(), 1000);
+    }
   } catch (e) {
     _recordsDirty = true;
     console.error('[records] flush failed:', e.message);
@@ -857,36 +863,57 @@ function checkPassword(user, input) {
   return false;
 }
 
-app.post('/api/auth/login', rateLimit(60000, 20, req => 'lg:' + (req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : (req.ip || ''))), async (req, res) => {
+// 登录限流：
+//   · 同一出口 IP 120 次/分钟兜底（教室/公司共用 WiFi 时，几十人同时登录也不会被误伤）
+//   · 单个账号 20 次/分钟，防止针对某个账号暴力尝试
+const _loginIpKey = req => 'lgip:' + (req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : (req.ip || ''));
+app.post('/api/auth/login', rateLimit(60000, 120, _loginIpKey), rateLimit(60000, 20, req => 'lg:' + ((req.body && req.body.username) || _loginIpKey(req))), async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: '请输入用户名（或姓名）和密码' });
   
-  const users = await db.readObjRaw('users.json');
-  let user = users[username];
+  let outcome = null;
+  // 登录必须加锁并重新读取最新用户表：
+  // 原来「读整表 → 改自己的 token → 写整表」在多人同时登录时会互相覆盖，
+  // 早登录的人 token 被后登录的人写丢，之后所有请求都 401（表现为「开始考试失败」）。
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    let user = users[username];
 
-  if (!user) {
-    // 按姓名匹配
-    const byName = Object.values(users).filter(u => u.name === username);
-    if (byName.length === 0) {
-      auditLog.recordLogin(req, { username, user: null, result: 'fail', reason: '账号不存在' });
-      return res.status(401).json({ error: '账号不存在，请核对用户名或姓名' });
+    if (!user) {
+      // 按姓名匹配
+      const byName = Object.values(users).filter(u => u.name === username);
+      if (byName.length === 0) { outcome = { status: 401, error: '账号不存在，请核对用户名或姓名', reason: '账号不存在' }; return; }
+      if (byName.length > 1) {
+        outcome = { user: byName[0], status: 401, error: `该姓名对应 ${byName.length} 个账号，请改用用户名登录`, reason: `姓名重复(${byName.length}个账号)` };
+        return;
+      }
+      user = byName[0];
     }
-    if (byName.length > 1) {
-      auditLog.recordLogin(req, { username, user: byName[0], result: 'fail', reason: `姓名重复(${byName.length}个账号)` });
-      return res.status(401).json({ error: `该姓名对应 ${byName.length} 个账号，请改用用户名登录` });
+
+    if (!checkPassword(user, password)) {
+      outcome = { user, status: 401, error: '密码错误', reason: '密码错误' };
+      return;
     }
-    user = byName[0];
+
+    // 复用已有 token，而不是每次登录都重新生成：
+    // 这样同一账号可以在手机和电脑上同时登录，不会互相踢下线。
+    let token = user.token;
+    if (!token) {
+      token = generateToken();
+      user.token = token;
+      users[user.username] = user;
+      await db.writeRaw('users.json', users);
+    }
+    outcome = { user, token };
+  });
+
+  if (!outcome || !outcome.token) {
+    auditLog.recordLogin(req, { username, user: (outcome && outcome.user) || null, result: 'fail', reason: (outcome && outcome.reason) || '登录失败' });
+    return res.status((outcome && outcome.status) || 401).json({ error: (outcome && outcome.error) || '登录失败' });
   }
 
-  if (!checkPassword(user, password)) {
-    auditLog.recordLogin(req, { username, user, result: 'fail', reason: '密码错误' });
-    return res.status(401).json({ error: '密码错误' });
-  }
-
-  const token = generateToken();
-  user.token = token;
-  users[user.username] = user;
-  await db.writeRaw('users.json', users);
+  const user = outcome.user;
+  const token = outcome.token;
 
   auditLog.recordLogin(req, { username, user, result: 'ok', reason: '' });
   res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, token } });
@@ -904,13 +931,17 @@ app.put('/api/auth/password', authMiddleware, async (req, res) => {
   if (!oldPassword || !newPassword) return res.status(400).json({ error: '参数不完整' });
   if (newPassword.length < 4) return res.status(400).json({ error: '新密码至少4位' });
   
-  const users = await db.readObj('users.json');
-  const user = users[req.currentUser.username];
-  if (!checkPassword(user, oldPassword)) return res.status(400).json({ error: '原密码错误' });
-  
-  user.password = newPassword; // 明文存储
-  users[req.currentUser.username] = user;
-  await db.writeObj('users.json', users);
+  let error = '';
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    const user = users[req.currentUser.username];
+    if (!user) { error = '账号不存在'; return; }
+    if (!checkPassword(user, oldPassword)) { error = '原密码错误'; return; }
+    user.password = newPassword; // 明文存储
+    users[user.username] = user;
+    await db.writeRaw('users.json', users);
+  });
+  if (error) return res.status(400).json({ error });
   res.json({ success: true });
 });
 
@@ -921,16 +952,19 @@ app.post('/api/admin/mentors', adminAuth, async (req, res) => {
   const { username, password, name } = req.body;
   if (!username || !password || !name) return res.status(400).json({ error: '参数不完整' });
   
-  const users = await db.readObj('users.json');
-  if (users[username]) return res.status(400).json({ error: '用户名已存在' });
-  
-  users[username] = {
-    username, name: name.trim(),
-    password, // 明文存储（超管可查看/导出）
-    role: 'mentor',
-    createdAt: new Date().toISOString()
-  };
-  await db.writeObj('users.json', users);
+  let conflict = false;
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    if (users[username]) { conflict = true; return; }
+    users[username] = {
+      username, name: name.trim(),
+      password, // 明文存储（超管可查看/导出）
+      role: 'mentor',
+      createdAt: new Date().toISOString()
+    };
+    await db.writeRaw('users.json', users);
+  });
+  if (conflict) return res.status(400).json({ error: '用户名已存在' });
   res.json({ success: true, user: { username, name: name.trim(), role: 'mentor' } });
 });
 
@@ -966,10 +1000,14 @@ app.get('/api/admin/users', adminAuth, async (req, res) => {
 // 管理员删除用户
 app.delete('/api/admin/users/:username', adminAuth, async (req, res) => {
   if (req.params.username === 'PC') return res.status(400).json({ error: '不能删除超级管理员' });
-  const users = await db.readObj('users.json');
-  if (!users[req.params.username]) return res.status(404).json({ error: '用户不存在' });
-  delete users[req.params.username];
-  await db.writeObj('users.json', users);
+  let missing = false;
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    if (!users[req.params.username]) { missing = true; return; }
+    delete users[req.params.username];
+    await db.writeRaw('users.json', users);
+  });
+  if (missing) return res.status(404).json({ error: '用户不存在' });
   res.json({ success: true });
 });
 
@@ -977,10 +1015,14 @@ app.delete('/api/admin/users/:username', adminAuth, async (req, res) => {
 app.put('/api/admin/users/:username/reset-password', adminAuth, async (req, res) => {
   const { newPassword } = req.body;
   if (!newPassword || newPassword.length < 4) return res.status(400).json({ error: '新密码至少4位' });
-  const users = await db.readObj('users.json');
-  if (!users[req.params.username]) return res.status(404).json({ error: '用户不存在' });
-  users[req.params.username].password = newPassword; // 明文存储
-  await db.writeObj('users.json', users);
+  let missing = false;
+  await db.withLock('users.json', async () => {
+    const users = await db.readObjRaw('users.json');
+    if (!users[req.params.username]) { missing = true; return; }
+    users[req.params.username].password = newPassword; // 明文存储
+    await db.writeRaw('users.json', users);
+  });
+  if (missing) return res.status(404).json({ error: '用户不存在' });
   res.json({ success: true });
 });
 
@@ -1257,7 +1299,7 @@ app.get('/api/attempts/:studentName', authMiddleware, async (req, res) => {
   res.json({ success: true, attempts, maxAttempts: MAX_ATTEMPTS });
 });
 
-app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + (req.currentUser && req.currentUser.name ? req.currentUser.name : req.ip)), async (req, res) => {
+app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + (req.currentUser ? req.currentUser.username : req.ip)), async (req, res) => {
   await loadExamSessions();
   const studentName = req.currentUser ? req.currentUser.name : '';
   if (!studentName) return res.status(401).json({ error: '未登录' });
@@ -1375,7 +1417,7 @@ app.post('/api/start-exam', authMiddleware, rateLimit(60000, 15, req => 'ex:' + 
   });
 });
 
-app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (req.currentUser && req.currentUser.name ? req.currentUser.name : req.ip)), async (req, res) => {
+app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (req.currentUser ? req.currentUser.username : req.ip)), async (req, res) => {
   const body = req.body || {};
   const studentName = req.currentUser ? req.currentUser.name : '';
   if (!studentName) return res.status(401).json({ error: '未登录' });

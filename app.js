@@ -110,7 +110,16 @@ function api(path, opts={}){
   const timer = setTimeout(() => controller.abort(), opts.timeout || 20000);
   return fetch(url, { ...opts, headers, signal: controller.signal })
     .finally(() => clearTimeout(timer))
-    .then(r => r.json());
+    .then(async r => {
+      let body = null;
+      try { body = await r.json(); } catch(e){ body = {}; }
+      // 统一处理登录态失效：回到登录页并明确提示，而不是把 401 显示成「开始考试失败」
+      const isAuthEntry = path.indexOf('/api/auth/login') === 0 || path.indexOf('/api/auth/register') === 0;
+      if (r.status === 401 && state.authToken && !isAuthEntry) {
+        handleSessionExpired();
+      }
+      return body;
+    });
 }
 function showToast(msg, type='info'){
   const t = document.createElement('div');
@@ -469,6 +478,16 @@ function logout(){
   render();
 }
 
+// 登录态失效（token 被重置/账号被踢）：清理本地状态并回到登录页，避免用户看到「考试失败」却不知道原因
+let _sessionExpiredNotified = false;
+function handleSessionExpired(){
+  if (_sessionExpiredNotified) return;
+  _sessionExpiredNotified = true;
+  logout();
+  showToast('登录已过期，请重新登录后再开始考试', 'error');
+  setTimeout(() => { _sessionExpiredNotified = false; }, 3000);
+}
+
 // ===== 首页 =====
 async function renderHome(app){
   const user = state.currentUser;
@@ -735,19 +754,25 @@ function renderExamList(exams){
 // ===== 开始考试 =====
 async function startExam(examId){
   if (!state.currentUser) return;
-  const res = await api('/api/start-exam', {
-    method:'POST',
-    body:JSON.stringify({ studentName: state.currentUser.name, examId })
-  });
-  if (!res.success){
-    if (res.blocked){
+  let res;
+  try {
+    res = await api('/api/start-exam', {
+      method:'POST',
+      body:JSON.stringify({ studentName: state.currentUser.name, examId })
+    });
+  } catch(e){
+    showToast('网络不稳定，未能加载试卷，请稍后重试', 'error');
+    return;
+  }
+  if (!res || !res.success){
+    if (res && res.blocked){
       showToast(`该考试已达最大尝试次数（${MAX_ATTEMPTS}次）`,'warning');
       if (res.bestRecord) showToast(`历史最佳成绩：${res.bestRecord.score}分`,'info');
-    } else if (res.locked){
-      showToast(res.message || '请先通过上一场考核','warning');
+    } else if (res && res.locked){
+      showToast(res.message || res.error || '请先通过上一场考核','warning');
       if (res.bestRecord) showToast(`上一场最佳成绩：${res.bestRecord.score}分${res.bestRecord.passed ? (res.bestRecord.mentorScored ? '（已通过）' : '（待导师评分）') : ''}`,'info');
     } else {
-      showToast(res.message || '开始考试失败','error');
+      showToast((res && (res.error || res.message)) || '开始考试失败，请稍后重试','error');
     }
     return;
   }
@@ -3931,5 +3956,16 @@ async function deleteSceneDefense(id){
 // ===== 初始化 =====
 restoreSession();
 render();
+
+// 启动时校验一次登录态：token 失效就退回登录页，
+// 而不是让用户进到板块、点「开始考试」才收到 401（旧版会显示成「开始考试失败」）
+if (state.authToken) {
+  api('/api/auth/me').then(res => {
+    if (res && res.success && res.user) {
+      state.currentUser = { ...state.currentUser, ...res.user };
+      localStorage.setItem('quiz_current_user', JSON.stringify(state.currentUser));
+    }
+  }).catch(() => {});
+}
 
 })();
