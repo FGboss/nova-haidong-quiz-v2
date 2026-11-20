@@ -116,6 +116,7 @@ process.on('SIGINT', () => flushRecordsOnExit('SIGINT'));
 function recordSummary(r) {
   const qs = Array.isArray(r.questions) ? r.questions : [];
   const manualCount = qs.filter(isManualScoredQuestion).length;
+  const ai = r.aiScoring || null;
   return {
     id: r.id, studentName: r.studentName, examId: r.examId, examTitle: r.examTitle,
     panel: r.panel, attemptNumber: r.attemptNumber, submitTime: r.submitTime,
@@ -123,12 +124,189 @@ function recordSummary(r) {
     passScore: r.passScore, passed: r.passed, mentorScored: r.mentorScored,
     mentorPending: r.mentorPending, timeSpent: r.timeSpent,
     manualCount, needsScoring: manualCount > 0,
-    aiCheck: r.aiCheck, typeScores: r.typeScores, mentorComment: r.mentorComment
+    aiCheck: r.aiCheck, typeScores: r.typeScores, mentorComment: r.mentorComment,
+    // 智能评分状态：pending/running/done/failed/skipped
+    studentRole: r.studentRole || '',
+    scoreSource: r.scoreSource || (r.mentorScored ? 'human' : 'auto'),
+    aiScore: (r.aiScore === 0 || r.aiScore) ? r.aiScore : null,
+    aiMax: ai ? (ai.max || null) : null,
+    aiStatus: ai ? ai.status : null,
+    aiEngine: ai ? (ai.engine || '') : '',
+    aiConfidence: ai && ai.perQuestion
+      ? Math.min(...Object.values(ai.perQuestion).map(x => Number(x.confidence) || 1))
+      : null
   };
 }
 
 // ===== AI 倾向检测（本地多维，可解释，供导师参考） =====
 const aiDetect = require('./aiDetect');
+
+// ===== 主观题智能评分（音频场景专项试点） =====
+const aiGrader = require('./aiGrader');
+
+// ===== 主观题智能评分：异步队列（音频场景专项试点） =====
+// 提交后只入队，不阻塞学员；本地引擎毫秒级完成，大模型引擎按单并发串行，
+// 结果回写到记录并自动重算总分。进程重启后会自动恢复未完成的评分任务。
+const AI_ALLOW_SELF_REVIEW = process.env.AI_ALLOW_SELF_REVIEW === 'true';
+const AI_QUEUE = [];
+const AI_QUEUE_SET = new Set();
+let _aiRunning = false;
+
+function roundHalf(n) { return Math.round(Number(n) * 2) / 2; }
+
+function objectiveScoreOf(record) {
+  const ts = record.typeScores || {};
+  let sum = 0;
+  let found = false;
+  for (const k of Object.keys(ts)) {
+    if (k === 'short') continue;
+    if (ts[k] && typeof ts[k].score === 'number') { sum += ts[k].score; found = true; }
+  }
+  return roundHalf(found ? sum : (Number(record.autoScore) || 0));
+}
+
+function applyAiResult(record, result) {
+  const prev = record.aiScoring || {};
+  record.aiScoring = {
+    ...prev,
+    status: 'done',
+    engine: result.provider,
+    model: result.model,
+    finishedAt: new Date().toISOString(),
+    error: null,
+    total: result.total,
+    max: result.max,
+    perQuestion: result.perQuestion,
+    kbUsed: result.kbUsed || [],
+    version: result.version || 1,
+    originalTotal: (prev.originalTotal !== undefined && prev.originalTotal !== null) ? prev.originalTotal : result.total
+  };
+  record.aiScore = result.total;
+
+  // 逐题写入 questionScores，便于导师评分弹窗直接展示与预填
+  const qs = Array.isArray(record.questionScores) ? record.questionScores : [];
+  for (const qid of Object.keys(result.perQuestion || {})) {
+    const rq = result.perQuestion[qid];
+    const patch = {
+      id: qid,
+      score: rq.score,
+      maxScore: rq.max,
+      manual: true,
+      aiScored: true,
+      aiComment: rq.comment,
+      aiItems: rq.items,
+      aiMissing: rq.missing,
+      aiConfidence: rq.confidence
+    };
+    const idx = qs.findIndex(x => x && x.id === qid);
+    if (idx >= 0) Object.assign(qs[idx], patch);
+    else qs.push(patch);
+  }
+  record.questionScores = qs;
+  record.typeScores = record.typeScores || {};
+  record.typeScores.short = { score: result.total, max: result.max, total: result.max };
+
+  // 人工已经评过的卷子：AI 结果只作为参考，不覆盖人工分数
+  if (record.scoreSource === 'human') {
+    record.aiScoring.overridden = true;
+    record.aiScoring.originalTotal = record.aiScore;
+  } else {
+    record.scoreSource = 'ai';
+    const objective = objectiveScoreOf(record);
+    record.finalScore = roundHalf(objective + result.total);
+    const line = Number(record.passScore) || PASSING_SCORE;
+    record.passed = record.finalScore >= line;
+  }
+  markRecordsDirty();
+}
+
+async function scoreRecordById(recordId) {
+  const records = await readRecordsCached();
+  const record = records.find(r => r && r.id === recordId);
+  if (!record) return;
+  if (record.scoreSource === 'human') return; // 人工评分优先，不再自动评分
+  const ai = record.aiScoring || {};
+  if (ai.status === 'done') return;
+  if (!aiGrader.isEnabledForPanel(record.panel)) return;
+
+  record.aiScoring = {
+    ...ai,
+    status: 'running',
+    attempts: (ai.attempts || 0) + 1,
+    startedAt: ai.startedAt || new Date().toISOString(),
+    error: null
+  };
+  markRecordsDirty();
+
+  try {
+    const result = await aiGrader.gradeRecord(record);
+    if (!result) {
+      record.aiScoring.status = 'failed';
+      record.aiScoring.error = '没有可评分的主观题';
+      markRecordsDirty();
+      return;
+    }
+    applyAiResult(record, result);
+    console.log(`[aiGrader] ${recordId} ${result.provider} ${result.total}/${result.max}`);
+  } catch (e) {
+    console.error('[aiGrader] 评分失败:', recordId, e.message);
+    record.aiScoring.error = String(e.message || e).slice(0, 300);
+    if ((record.aiScoring.attempts || 0) < 3) {
+      record.aiScoring.status = 'pending';
+      markRecordsDirty();
+      setTimeout(() => enqueueAiScoring(recordId), 2000 * (record.aiScoring.attempts || 1));
+    } else {
+      record.aiScoring.status = 'failed';
+      markRecordsDirty();
+    }
+  }
+}
+
+function enqueueAiScoring(recordId) {
+  if (!recordId || AI_QUEUE_SET.has(recordId)) return;
+  AI_QUEUE_SET.add(recordId);
+  AI_QUEUE.push(recordId);
+  setTimeout(runAiQueue, 20);
+}
+
+async function runAiQueue() {
+  if (_aiRunning) return;
+  _aiRunning = true;
+  try {
+    while (AI_QUEUE.length) {
+      const id = AI_QUEUE.shift();
+      AI_QUEUE_SET.delete(id);
+      try { await scoreRecordById(id); } catch (e) { console.error('[aiGrader] queue error:', e.message); }
+    }
+  } finally {
+    _aiRunning = false;
+  }
+}
+
+// 启动时扫描：恢复未完成任务 + 给历史音频卷补齐智能评分
+async function resumeAiScoring() {
+  if (!aiGrader.CONFIG.enabled) return;
+  try {
+    const records = await readRecordsCached();
+    let queued = 0;
+    for (const r of records) {
+      if (!r || r.panel !== 'audio') continue;
+      if (r.scoreSource === 'human') continue; // 人工已评分的不动
+      const ai = r.aiScoring;
+      if (ai && ai.status === 'done') continue;
+      if (ai && ai.status === 'failed' && (ai.attempts || 0) >= 3) continue;
+      if (queued >= 200) break;
+      if (ai && ai.status === 'running') ai.status = 'pending';
+      enqueueAiScoring(r.id);
+      queued++;
+    }
+    if (queued) console.log(`[aiGrader] 恢复/补齐评分任务 ${queued} 条`);
+  } catch (e) {
+    console.error('[aiGrader] resume failed:', e.message);
+  }
+}
+
+
 
 // ===== 审计日志（登录记录/操作记录，纯旁路） =====
 const auditLog = require('./auditLog');
@@ -1546,9 +1724,22 @@ app.post('/api/records', authMiddleware, rateLimit(60000, 15, req => 'rc:' + (re
     recordSafe.typeScores = typeScores;
     recordSafe.mentorScored = false;
     recordSafe.mentorPending = isGatedPanel(recordSafe.panel) || questions.some(isManualScoredQuestion);
+    recordSafe.studentRole = req.currentUser ? (req.currentUser.role || '') : (recordSafe.studentRole || '');
+    recordSafe.scoreSource = 'auto';
+    // 音频场景专项试点：含主观题时投递异步智能评分（不阻塞提交）
+    const hasManual = questions.some(isManualScoredQuestion);
+    if (hasManual && aiGrader.isEnabledForPanel(recordSafe.panel)) {
+      recordSafe.aiScoring = {
+        status: 'pending',
+        engine: aiGrader.activeProvider(),
+        attempts: 0,
+        enqueuedAt: new Date().toISOString()
+      };
+    }
 
     records.push(recordSafe);
     markRecordsDirty(); // 合并写回，提交响应不必等落盘
+    if (recordSafe.aiScoring) enqueueAiScoring(recordSafe.id);
     session.used = true; // 标记会话已使用，防止同一试卷会话重复提交
     savedRecord = recordSafe;
   }
@@ -1730,6 +1921,10 @@ app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   const idx = records.findIndex(r => r.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: '记录不存在' });
   const target = records[idx];
+  // 导师不能给自己的试卷评分（AI 已自动出分）；管理员可复核
+  if (target.studentName === req.currentUser.name && req.currentUser.role === 'mentor' && !AI_ALLOW_SELF_REVIEW) {
+    return res.status(403).json({ error: '不能给自己的试卷评分，请由其他导师或管理员复核' });
+  }
   if (mentorScore !== undefined) target.mentorScore = mentorScore;
   if (finalScore !== undefined) target.finalScore = finalScore;
   if (mentorScored !== undefined) target.mentorScored = !!mentorScored;
@@ -1737,6 +1932,16 @@ app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   if (questionScores !== undefined) target.questionScores = questionScores;
   if (typeScores !== undefined) target.typeScores = typeScores;
   if (mentorComment !== undefined) target.mentorComment = String(mentorComment).slice(0, 2000);
+  // 人工评分优先：保留 AI 原始分用于追溯，此后不再被自动评分覆盖
+  if (mentorScore !== undefined || finalScore !== undefined) {
+    target.scoreSource = 'human';
+    if (target.aiScoring) {
+      target.aiScoring.overridden = true;
+      if (target.aiScoring.originalTotal === undefined || target.aiScoring.originalTotal === null) {
+        target.aiScoring.originalTotal = target.aiScore;
+      }
+    }
+  }
   // 通过线由服务端按该场考试配置判定（场景化固定卷为 80 分），不信任客户端传入的 passed
   const examCfg = allExams.find(e => e.id === target.examId);
   const line = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
@@ -1746,6 +1951,51 @@ app.put('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   if (isGatedPanel(target.panel) || (target.questions || []).some(isManualScoredQuestion)) target.mentorPending = !target.mentorScored;
   markRecordsDirty();
   res.json({ success: true, record: target });
+});
+
+// ===== 智能评分：重新评分 / 历史卷补齐（音频场景专项试点） =====
+app.post('/api/mentor/records/:id/ai-rescore', mentorAuth, async (req, res) => {
+  const records = await readRecordsCached();
+  const target = records.find(r => r.id === req.params.id);
+  if (!target) return res.status(404).json({ error: '记录不存在' });
+  if (!aiGrader.isEnabledForPanel(target.panel)) return res.status(400).json({ error: '该板块未开启智能评分' });
+  if (target.studentName === req.currentUser.name && req.currentUser.role === 'mentor' && !AI_ALLOW_SELF_REVIEW) {
+    return res.status(403).json({ error: '不能重新评分自己的试卷' });
+  }
+  if (target.scoreSource === 'human') {
+    return res.status(400).json({ error: '该试卷已人工评分，如需重新自动评分请先撤销人工评分' });
+  }
+  target.aiScoring = {
+    ...(target.aiScoring || {}),
+    status: 'pending',
+    attempts: 0,
+    error: null,
+    enqueuedAt: new Date().toISOString()
+  };
+  markRecordsDirty();
+  enqueueAiScoring(target.id);
+  res.json({ success: true, aiStatus: 'pending' });
+});
+
+app.post('/api/mentor/ai-backfill', mentorAuth, async (req, res) => {
+  if (req.currentUser.role !== 'admin') return res.status(403).json({ error: '仅管理员可执行历史卷补齐' });
+  const records = await readRecordsCached();
+  let queued = 0;
+  for (const r of records) {
+    if (!r || r.panel !== 'audio' || r.scoreSource === 'human') continue;
+    if (r.aiScoring && r.aiScoring.status === 'done') continue;
+    r.aiScoring = {
+      ...(r.aiScoring || {}),
+      status: 'pending',
+      attempts: 0,
+      error: null,
+      enqueuedAt: new Date().toISOString()
+    };
+    enqueueAiScoring(r.id);
+    queued++;
+  }
+  markRecordsDirty();
+  res.json({ success: true, queued });
 });
 
 // ===== 管理端：安全/访问日志（导师/管理员可查，用于追溯爬虫与异常访问） =====
@@ -1769,14 +2019,18 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   if (idx < 0) return res.status(404).json({ error: '记录不存在' });
   const target = records[idx];
   target.mentorScore = null;
-  target.finalScore = target.autoScore;
-  // 撤销评分后：闯关式固定卷（场景化/音频）按该卷通过线重判，其余沿用全局通过线
+  // 撤销人工评分后：若已有 AI 自动评分则回到 AI 分数，否则回到客观分
+  const aiTotal = (target.aiScoring && target.aiScoring.status === 'done' && typeof target.aiScore === 'number') ? target.aiScore : null;
+  target.finalScore = roundHalf(objectiveScoreOf(target) + (aiTotal || 0));
+  target.scoreSource = aiTotal !== null ? 'ai' : 'auto';
+  if (target.aiScoring) target.aiScoring.overridden = false;
+  // 闯关式固定卷（场景化/音频）按该卷通过线重判，其余沿用全局通过线
   if (isGatedPanel(target.panel)) {
     const examCfg = allExams.find(e => e.id === target.examId);
     target.passScore = (examCfg && examCfg.passScore) ? examCfg.passScore : PASSING_SCORE;
-    target.passed = target.autoScore >= target.passScore;
+    target.passed = target.finalScore >= target.passScore;
   } else {
-    target.passed = target.autoScore >= PASSING_SCORE;
+    target.passed = target.finalScore >= PASSING_SCORE;
   }
   target.mentorScored = false;
   target.mentorPending = isGatedPanel(target.panel) || (target.questions || []).some(isManualScoredQuestion);
@@ -2842,6 +3096,8 @@ const PORT = process.env.PORT || 3000;
   await restoreQuestionsFromSupabase(); // 恢复本地文件
   // 启动时就把答题记录拉进内存：否则重启后第一个访问者要为整表读取等 1s 左右
   try { await readRecordsCached(); } catch (e) { console.error('[records] preload failed:', e.message); }
+  // 恢复未完成的智能评分任务，并为音频场景专项历史卷补齐评分
+  resumeAiScoring().catch(e => console.error('[aiGrader] resume error:', e.message));
   
   app.listen(PORT, () => {
     console.log(`[server] Quiz System V3 running on port ${PORT}`);

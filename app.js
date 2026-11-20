@@ -1042,11 +1042,15 @@ function renderResult(app){
   const score = record.finalScore !== undefined ? record.finalScore : record.autoScore;
   const passLine = (exam && exam.passScore) ? exam.passScore : PASSING_SCORE;
   const isScene = !!(exam && isGatedPanel(exam.panel));
-  const pendingMentor = isScene && !!record.mentorPending && !record.mentorScored;
+  const aiStatus = record.aiStatus || (record.aiScoring && record.aiScoring.status) || null;
+  const aiPending = aiStatus === 'pending' || aiStatus === 'running';
+  const pendingMentor = isScene && !!record.mentorPending && !record.mentorScored && !aiPending;
   const typeScores = record.typeScores || {};
   const tag = getScoreTag(score, passLine);
   let resultText;
-  if (pendingMentor){
+  if (aiPending){
+    resultText = '🤖 客观题已出分，AI 正在评阅主观题…完成后自动更新总分，无需重复提交';
+  } else if (pendingMentor){
     resultText = `📝 客观题已判分，主观题等待导师评分后判定（通过线 ${passLine} 分）`;
   } else if (record.passed){
     resultText = '🎉 恭喜通过！';
@@ -1055,6 +1059,11 @@ function renderResult(app){
   } else {
     resultText = '📖 仍需继续努力，加油！';
   }
+  const aiNote = aiStatus === 'done' && !record.mentorScored
+    ? `AI 已完成主观题评分（${record.aiScore !== null && record.aiScore !== undefined ? record.aiScore : '-'} / ${record.aiMax || '-'} 分），导师可复核调整。`
+    : (aiStatus === 'failed'
+      ? '本次 AI 评分未完成，已转导师人工评分。'
+      : '');
 
   app.innerHTML = `
     <div class="header">
@@ -1080,12 +1089,47 @@ function renderResult(app){
             <div class="score-item-value">${(typeScores[t]||{}).score||0} / ${(typeScores[t]||{}).max||0}</div>
           </div>`).join('')}
       </div>
+      ${(aiPending || aiNote) ? `<div style="margin:16px auto 0;max-width:640px;background:${aiPending?'#eff6ff':'#f0fdf4'};border:1px solid ${aiPending?'#93c5fd':'#86efac'};border-radius:12px;padding:12px 16px;font-size:13px;color:${aiPending?'#1d4ed8':'#166534'};line-height:1.6">
+        <strong>${aiPending ? '🤖 AI 智能评分中' : '🤖 AI 智能评分已完成'}</strong><br>
+        ${aiPending ? '主观题正在按评分细则逐项评阅，完成后本页会自动更新总分。请勿重复提交或反复刷新。' : aiNote}
+      </div>` : ''}
       <div style="text-align:center;margin-top:20px;display:flex;gap:12px;justify-content:center">
         ${state.remainingAttempts > 0 ? `<button class="btn btn-primary" onclick="APP.retryExam()">再次答题（${state.remainingAttempts}次）</button>` :
           `<button class="btn btn-outline" disabled>已达上限</button>`}
         <button class="btn btn-outline" onclick="APP.backToPanel()">返回列表</button>
       </div>
     </div>`;
+  if (aiPending) startAiPolling(record.id);
+}
+
+// AI 评分轮询：完成后自动刷新结果页（最多约 2 分钟）
+function stopAiPolling(){
+  if (state._aiPollTimer){ clearInterval(state._aiPollTimer); state._aiPollTimer = null; }
+}
+function startAiPolling(recordId){
+  if (!recordId || !state.currentUser) return;
+  if (state._aiPollId === recordId && state._aiPollTimer) return;
+  stopAiPolling();
+  state._aiPollId = recordId;
+  let tries = 0;
+  state._aiPollTimer = setInterval(async () => {
+    tries++;
+    if (tries > 40){ stopAiPolling(); return; }
+    // 用户已经离开结果页就不再轮询
+    if (state.page !== 'result'){ stopAiPolling(); return; }
+    try {
+      const res = await api('/api/records/' + encodeURIComponent(state.currentUser.name));
+      const r = (res.records || []).find(x => x.id === recordId);
+      if (!r) return;
+      if (r.aiStatus === 'done' || r.aiStatus === 'failed' || r.aiStatus === 'skipped'){
+        stopAiPolling();
+        if (state.lastRecord && state.lastRecord.id === recordId){
+          Object.assign(state.lastRecord, r);
+          if (state.page === 'result') render();
+        }
+      }
+    } catch(e){ /* 网络抖动忽略，下个周期继续 */ }
+  }, 3000);
 }
 
 function retryExam(){
@@ -1599,7 +1643,12 @@ function renderMentorRecords(){
           <td style="font-size:12px">${new Date(r.submitTime).toLocaleString('zh-CN')}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
-            ${needsMentorScoring(r) ? `<button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">${r.mentorScored ? '改分' : '评分'}</button>` : ''}
+            ${(() => {
+              if (!needsMentorScoring(r)) return '';
+              const isSelf = state.currentUser && state.currentUser.role === 'mentor' && r.studentName === state.currentUser.name;
+              if (isSelf) return `<span style="font-size:12px;color:var(--text-sec)">不可自评，待管理员复核</span>`;
+              return `<button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">${r.mentorScored ? '改分' : '评分'}</button>`;
+            })()}
             <button class="btn btn-sm btn-danger" onclick="APP.deleteRecord('${r.id}')">删除</button>
           </td>
         </tr>`;
@@ -1722,17 +1771,23 @@ function renderMentorScoringSub(filter){
         const finalScore = r.finalScore !== undefined ? r.finalScore : autoScore;
         const ai = r.aiCheck && r.aiCheck.score !== undefined ? r.aiCheck : null;
         const aiCell = ai ? `<span class="badge ${ai.level==='高'?'badge-danger':(ai.level==='中'?'badge-warning':'badge-success')}" title="${escapeHtml((ai.summary||'')+' '+(ai.hits||[]).join('；'))}">${ai.score}分(${ai.level})</span>` : `<span class="text-sec" style="color:var(--text-sec)">—</span>`;
+        const isSelf = state.currentUser && state.currentUser.role === 'mentor' && r.studentName === state.currentUser.name;
+        const aiBadge = r.aiStatus === 'pending' || r.aiStatus === 'running'
+          ? '<span class="badge badge-info">🤖 AI评分中</span>'
+          : (r.aiStatus === 'done' && !r.mentorScored ? '<span class="badge badge-info">🤖 AI已评</span>' : (r.aiStatus === 'failed' ? '<span class="badge badge-warning">AI未完成</span>' : ''));
         return `<tr>
           <td>${escapeHtml(r.studentName)}</td>
           <td>${escapeHtml(r.examTitle || r.examId)}</td>
           <td>${aiCell}</td>
           <td>${autoScore}</td>
-          <td>${mentorScore}</td>
-          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore, passLineOf(r)).cls}">${getScoreTag(finalScore, passLineOf(r)).label}</span> ${needsMentorScoring(r) ? (r.mentorScored ? '<span class="badge badge-success">已评</span>' : '<span class="badge badge-warning">待评</span>') : ''}</td>
+          <td>${r.mentorScored ? mentorScore : (r.aiStatus === 'done' ? `<span title="AI 自动评分">🤖 ${r.aiScore}</span>` : mentorScore)}</td>
+          <td><strong>${finalScore}</strong> <span class="badge ${getScoreTag(finalScore, passLineOf(r)).cls}">${getScoreTag(finalScore, passLineOf(r)).label}</span> ${aiBadge} ${needsMentorScoring(r) ? (r.mentorScored ? '<span class="badge badge-success">已评</span>' : (isSelf ? '<span class="badge badge-warning">待管理员复核</span>' : '<span class="badge badge-warning">待评</span>')) : ''}</td>
           <td>
             <button class="btn btn-sm btn-outline" onclick="APP.viewRecordDetail('${r.id}')">查看</button>
             ${needsMentorScoring(r)
-              ? `<button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">${r.mentorScored ? '改分' : '评分'}</button>`
+              ? (isSelf
+                ? `<span style="font-size:12px;color:var(--text-sec)">不能自评</span>`
+                : `<button class="btn btn-sm btn-primary" onclick="APP.openScoringDetail('${r.id}')">${r.mentorScored ? '改分' : (r.aiStatus === 'done' ? '复核' : '评分')}</button>`)
               : `<span style="font-size:12px;color:var(--text-sec)">无需评分</span>`}
           </td>
         </tr>`;
@@ -2254,17 +2309,26 @@ async function openScoringDetail(recordId){
       record = res.record;
     } catch(e){ showToast('加载失败，请重试','error'); return; }
   }
+  // 缓存完整记录：保存评分时需要题目快照（列表摘要里没有）
+  state._recordDetails = state._recordDetails || {};
+  state._recordDetails[recordId] = record;
   const questions = (record.questions||[]).filter(isManualScoredQuestion);
   if (questions.length === 0){ showToast('该卷无需导师评分','info'); return; }
   const answers = record.answers || {};
   const mentorDetails = record.mentorScoreDetails || {};
+  const aiScoring = record.aiScoring || null;
+  const aiQ = id => (aiScoring && aiScoring.perQuestion && aiScoring.perQuestion[id]) || null;
   const aiCheck = record.aiCheck || {};
   const aiColor = l => l==='高' ? 'var(--danger)' : (l==='中' ? 'var(--warning)' : 'var(--success)');
   // 评分参考：本场通过线、客观题得分与主观题需达到的分数（场景化固定卷通过线 80）
   const typeScores = record.typeScores || {};
   const objectiveScore = (typeScores.single?.score||0) + (typeScores.multiple?.score||0) + (typeScores.fill?.score||0) + (typeScores.judge?.score||0);
   const shortMax = questions.reduce((s,q) => s + (q.points||10), 0);
-  const savedShort = questions.reduce((s,q) => s + (Number(mentorDetails[q.id]?.mentorScore)||0), 0);
+  const savedShort = record.mentorScored
+    ? questions.reduce((s,q) => s + (Number(mentorDetails[q.id]?.mentorScore)||0), 0)
+    : (aiScoring && aiScoring.status === 'done' && typeof record.aiScore === 'number'
+      ? Number(record.aiScore)
+      : questions.reduce((s,q) => s + (Number(mentorDetails[q.id]?.mentorScore)||0), 0));
   const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (isGatedPanel(record.panel) ? 80 : PASSING_SCORE);
   const needShort = Math.max(0, passLine - objectiveScore);
   // 单题 AI 倾向徽章 + 命中证据
@@ -2293,6 +2357,15 @@ async function openScoringDetail(recordId){
           <span style="font-weight:700;color:${aiColor(aiCheck.level)}">🤖 AI 综合倾向 ${aiCheck.score}分（${aiCheck.level}）</span>
           <span style="font-size:12px;color:var(--text-sec);margin-left:8px">${escapeHtml(aiCheck.summary || '')} — 仅供参考，请结合原文与命中证据人工判断</span>
         </div>` : ''}
+        ${aiScoring && aiScoring.status==='done' ? `
+        <div style="padding:10px 12px;border-radius:8px;margin-bottom:12px;background:#eff6ff;border:1px solid #93c5fd">
+          <div style="font-weight:700;color:#1d4ed8">🤖 AI 自动评分：主观题 ${record.aiScore !== null && record.aiScore !== undefined ? record.aiScore : aiScoring.total} / ${aiScoring.max || shortMax} 分（已计入总分）</div>
+          <div style="font-size:12px;color:#1e40af;margin-top:4px;line-height:1.6">依据为每题的评分细则与参考答案逐项比对；下方导师评分已按 AI 结果预填，你可以直接修改后保存复核。${aiScoring.overridden ? '（当前展示的是导师已复核后的分数）' : ''}</div>
+        </div>` : ''}
+        ${aiScoring && (aiScoring.status==='pending' || aiScoring.status==='running') ? `
+        <div style="padding:8px 12px;border-radius:8px;margin-bottom:12px;background:#fefce8;border:1px solid #fde68a;font-size:13px;color:#92400e">
+          🤖 AI 正在评阅主观题，稍后重新打开本页即可看到评分依据。
+        </div>` : ''}
         <div style="padding:8px 12px;border-radius:8px;margin-bottom:12px;background:#eff6ff;border:1px solid #bfdbfe;font-size:13px;color:#1e40af;line-height:1.7">
           🎯 本场通过线 <b>${passLine}</b> 分｜客观题已得 <b>${objectiveScore}</b> 分｜主观题满分 <b>${shortMax}</b> 分<br>
           本场主观题需 ≥ <b>${needShort}</b> 分才可通过；当前已录入主观题 <b>${savedShort}</b> 分，合计 <b>${objectiveScore + savedShort}</b> 分
@@ -2300,11 +2373,20 @@ async function openScoringDetail(recordId){
         ${questions.map(q => {
           const userAns = answers[q.id] || '(未作答)';
           const prev = mentorDetails[q.id] || {};
-          const prevScore = prev.mentorScore !== undefined ? prev.mentorScore : 0;
+          const aiDetail = aiQ(q.id);
+          const prevScore = prev.mentorScore !== undefined ? prev.mentorScore : (aiDetail ? aiDetail.score : 0);
           return `<div class="scoring-card">
             <div class="scoring-question"><strong>${escapeHtml(q.question)}</strong>（满分${q.points||10}分）</div>
             <div class="scoring-answer">${escapeHtml(userAns)}</div>
             ${perQuestionAi(q.id)}
+            ${aiDetail ? `<div style="margin:0 0 8px;padding:8px 10px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe">
+              <div style="font-size:12px;font-weight:700;color:#1d4ed8">🤖 AI 评分 ${aiDetail.score} / ${aiDetail.max} 分${typeof aiDetail.confidence === 'number' ? `（置信度 ${Math.round(aiDetail.confidence * 100)}%）` : ''}</div>
+              <div style="margin-top:6px;max-height:150px;overflow:auto">
+                ${(aiDetail.items || []).map(it => `<div style="font-size:12px;color:#1e3a8a;line-height:1.6">· <b>${it.score}/${it.max}</b> ${escapeHtml(it.point)} — ${escapeHtml(it.reason || '')}</div>`).join('')}
+              </div>
+              ${(aiDetail.missing || []).length ? `<div style="font-size:12px;color:#b91c1c;margin-top:6px">扣分点：${aiDetail.missing.map(x => escapeHtml(x)).join('；')}</div>` : ''}
+              ${(aiDetail.references || []).length ? `<div style="font-size:11px;color:#64748b;margin-top:6px">参考依据：${aiDetail.references.map(r => escapeHtml(r.title)).join('、')}</div>` : ''}
+            </div>` : ''}
             ${q.answer && q.type==='short' ? `<div style="font-size:12px;color:var(--success);background:var(--success-light);padding:6px 8px;border-radius:6px;margin-bottom:8px"><strong>参考答案：</strong>${escapeHtml(q.answer)}</div>` : ''}
             ${q.examineRule ? `<div style="font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:6px 8px;border-radius:6px;margin-bottom:8px"><strong>评分细则：</strong>${escapeHtml(q.examineRule)}</div>` : ''}
             <div class="scoring-controls">
@@ -2322,6 +2404,7 @@ async function openScoringDetail(recordId){
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">取消</button>
         ${record.mentorScored ? `<button class="btn btn-warning" style="background:var(--warning);color:#fff" onclick="APP.resetMentorScore('${recordId}')">重置评分</button>` : ''}
+        ${(!record.mentorScored && (!record.aiScoring || record.aiScoring.status === 'failed' || record.aiScoring.status === 'skipped')) ? `<button class="btn btn-outline" onclick="APP.rescoreAi('${recordId}')">🤖 AI 重新评分</button>` : ''}
         <button class="btn btn-primary" onclick="APP.saveMentorScore('${recordId}')">保存评分</button>
       </div>
     </div>`;
@@ -2329,8 +2412,18 @@ async function openScoringDetail(recordId){
 }
 
 async function saveMentorScore(recordId){
-  const record = state.mentorRecords.find(r => r.id === recordId);
+  const record = (state._recordDetails && state._recordDetails[recordId]) || state.mentorRecords.find(r => r.id === recordId);
   if (!record) return;
+  // 列表是摘要（不含题目快照），若没有完整记录则回源拉取，避免把分数写成 0
+  if (!Array.isArray(record.questions)) {
+    try {
+      const res = await api(`/api/mentor/records/${recordId}`);
+      if (!res.success || !res.record){ showToast('记录不存在','error'); return; }
+      Object.assign(record, res.record);
+      state._recordDetails = state._recordDetails || {};
+      state._recordDetails[recordId] = record;
+    } catch(e){ showToast('加载失败，请重试','error'); return; }
+  }
   const questions = (record.questions||[]).filter(isManualScoredQuestion);
   let mentorScoreDetails = {};
   let shortScore = 0, shortMax = 0;
@@ -2405,6 +2498,22 @@ async function resetMentorScore(recordId){
       }
     }
   } catch(e){ showToast('重置失败','error'); }
+}
+
+async function rescoreAi(recordId){
+  if (!confirm('确定重新触发 AI 评分？将按当前人工评分为基准重新计算 AI 参考分。')) return;
+  try {
+    const res = await api(`/api/mentor/records/${recordId}/ai-rescore`, { method:'POST' });
+    if (res.success){
+      showToast('已提交 AI 重新评分，稍后刷新查看结果','success');
+      document.querySelector('.modal-overlay')?.remove();
+      if (state.page==='mentor'){
+        if (state.mentorTab==='scoring') renderMentorScoring();
+        else if (state.mentorTab==='records') renderMentorRecords();
+        else if (state.mentorTab==='overview') renderMentorOverview();
+      }
+    } else showToast(res.error || '提交失败','error');
+  } catch(e){ showToast('提交失败','error'); }
 }
 
 async function deleteRecord(recordId){
@@ -3421,7 +3530,7 @@ window.APP = {
   // Mentor
   goMentor, goAdmin, switchMentorTab, switchAdminTab,
   filterMentorPanel, setScoringFilter,
-  viewRecordDetail, openScoringDetail, saveMentorScore, resetMentorScore,
+  viewRecordDetail, openScoringDetail, saveMentorScore, resetMentorScore, rescoreAi,
   deleteRecord, clearAllRecords, exportRecords,
   // 学员管理（导师自主分配）
   toggleMentorStudentChip, saveMentorAssignment, resetMentorSelection,
