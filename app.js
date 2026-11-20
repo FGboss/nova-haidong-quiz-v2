@@ -1308,6 +1308,21 @@ function showRecordDetailModal(record){
   const answers = record.answers || {};
   const questionScores = record.questionScores || {};
   const score = record.finalScore !== undefined ? record.finalScore : record.autoScore;
+  const aiScoring = record.aiScoring || null;
+  const aiOf = id => (aiScoring && aiScoring.perQuestion && aiScoring.perQuestion[id]) || null;
+  // 主观题 AI 评分依据（可折叠，避免详情页过长）
+  const aiBasis = q => {
+    const d = aiOf(q.id);
+    if (!d) return '';
+    return `<details style="margin-top:6px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 10px">
+      <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#1d4ed8">🤖 AI 评分 ${d.score}/${d.max} 分 · 点击查看评分依据</summary>
+      <div style="margin-top:6px">
+        ${(d.items||[]).map(it => `<div style="font-size:12px;color:#1e3a8a;line-height:1.6">· <b>${it.score}/${it.max}</b> ${escapeHtml(it.point)}：${escapeHtml(it.reason || '')}</div>`).join('')}
+        ${(d.missing||[]).length ? `<div style="font-size:12px;color:#b91c1c;margin-top:4px">扣分点：${d.missing.map(x => escapeHtml(x)).join('；')}</div>` : ''}
+        ${(d.references||[]).length ? `<div style="font-size:11px;color:#64748b;margin-top:4px">参考依据：${d.references.map(r => escapeHtml(r.title)).join('、')}</div>` : ''}
+      </div>
+    </details>`;
+  };
 
   // 移除已有的弹窗
   document.querySelector('.modal-overlay')?.remove();
@@ -1333,17 +1348,28 @@ function showRecordDetailModal(record){
           const gotScore = qs.score !== undefined ? qs.score : 0;
           const maxScore = qs.maxScore || q.points || 5;
           const isCorrect = gotScore >= maxScore;
+          const isManual = isManualScoredQuestion(q);
+          const ai = isManual ? aiOf(q.id) : null;
+          let scoreLine;
+          if (isManual){
+            if (record.mentorScored){
+              scoreLine = `<span class="${isCorrect ? 'answer-correct' : 'answer-wrong'}">导师复核得分：${gotScore}/${maxScore}</span>`;
+            } else if (ai){
+              scoreLine = `<span style="color:#1d4ed8;font-weight:600">🤖 AI 已评分 ${ai.score}/${maxScore}，待导师复核</span>`;
+            } else {
+              scoreLine = `<span style="color:var(--warning);font-weight:600">⏳ 主观题待评分（满分 ${maxScore} 分）</span>`;
+            }
+          } else {
+            scoreLine = `<span class="${isCorrect ? 'answer-correct' : 'answer-wrong'}">得分：${gotScore}/${maxScore}</span>`;
+          }
           return `<div class="answer-detail">
             <div class="answer-detail-q">${i+1}. [${TYPE_LABELS[q.type]||'单题'}] ${escapeHtml(q.question)}</div>
             <div style="font-size:13px;margin-top:4px">
               <span style="color:var(--text-sec)">你的答案：</span>${escapeHtml(userAns)}
               ${q.answer ? `<span style="margin-left:8px;color:var(--text-sec)">正确答案：</span>${escapeHtml(q.answer)}` : ''}
             </div>
-            <div style="font-size:12px;margin-top:2px">
-              ${(isManualScoredQuestion(q) && !record.mentorScored)
-                ? `<span style="color:var(--warning);font-weight:600">⏳ 主观题待导师评分（满分 ${maxScore} 分）</span>`
-                : `<span class="${isCorrect ? 'answer-correct' : 'answer-wrong'}">得分：${gotScore}/${maxScore}</span>`}
-            </div>
+            <div style="font-size:12px;margin-top:2px">${scoreLine}</div>
+            ${isManual ? aiBasis(q) : ''}
           </div>`;
         }).join('')}
       </div>
@@ -2331,6 +2357,26 @@ async function openScoringDetail(recordId){
       : questions.reduce((s,q) => s + (Number(mentorDetails[q.id]?.mentorScore)||0), 0));
   const passLine = (typeof record.passScore === 'number' && record.passScore > 0) ? record.passScore : (isGatedPanel(record.panel) ? 80 : PASSING_SCORE);
   const needShort = Math.max(0, passLine - objectiveScore);
+  // 客观题得分明细：评分弹窗只展示主观题，这里补一份可展开的客观题逐题得分，
+  // 避免导师误以为「选择题的自动评分没了」。
+  const qScoreMap = record.questionScores || {};
+  const objectiveQs = (record.questions || []).filter(q => q && !isManualScoredQuestion(q));
+  const objectiveDetail = objectiveQs.length ? `<details style="margin-bottom:12px;padding:8px 12px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0">
+    <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#334155">📋 客观题得分明细：${objectiveScore} 分（共 ${objectiveQs.length} 题，点击展开）</summary>
+    <div style="margin-top:8px;max-height:220px;overflow:auto">
+      ${objectiveQs.map((q, i) => {
+        const qs = qScoreMap[q.id] || {};
+        const got = typeof qs.score === 'number' ? qs.score : 0;
+        const mx = qs.maxScore || q.points || 5;
+        const ua = (record.answers || {})[q.id];
+        return `<div style="font-size:12px;line-height:1.7;border-bottom:1px dashed #e2e8f0;padding:3px 0">
+          <span style="color:${got >= mx ? 'var(--success)' : 'var(--danger)'};font-weight:700">${got}/${mx}</span>
+          <span style="color:#475569"> ${i + 1}. [${TYPE_LABELS[q.type] || '单选'}] ${escapeHtml(String(q.question || '').slice(0, 70))}</span>
+          <span style="color:var(--text-sec)"> ｜作答：${escapeHtml(String(ua == null ? '(未作答)' : ua))}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </details>` : '';
   // 单题 AI 倾向徽章 + 命中证据
   const perQuestionAi = id => {
     const a = aiCheck.perQuestion && aiCheck.perQuestion[id];
@@ -2360,7 +2406,13 @@ async function openScoringDetail(recordId){
         ${aiScoring && aiScoring.status==='done' ? `
         <div style="padding:10px 12px;border-radius:8px;margin-bottom:12px;background:#eff6ff;border:1px solid #93c5fd">
           <div style="font-weight:700;color:#1d4ed8">🤖 AI 自动评分：主观题 ${record.aiScore !== null && record.aiScore !== undefined ? record.aiScore : aiScoring.total} / ${aiScoring.max || shortMax} 分（已计入总分）</div>
-          <div style="font-size:12px;color:#1e40af;margin-top:4px;line-height:1.6">依据为每题的评分细则与参考答案逐项比对；下方导师评分已按 AI 结果预填，你可以直接修改后保存复核。${aiScoring.overridden ? '（当前展示的是导师已复核后的分数）' : ''}</div>
+          <div style="font-size:12px;color:#1e40af;margin-top:4px;line-height:1.6">
+            评分依据：以每题「评分细则」的分项分值为主权重，逐项比对该项要点是否被答案覆盖，再结合参考答案核对关键计算与清单；只对未覆盖的评分项扣分，不因错别字、标点、排版或未照抄参考答案扣分。
+          </div>
+          <div style="font-size:11px;color:#3b82f6;margin-top:4px">
+            评分模型：${aiScoring.engine === 'llm' ? `大模型 ${escapeHtml(aiScoring.model || '')}` : '本地规则引擎（细则+参考答案）'}
+            ${(aiScoring.kbUsed && aiScoring.kbUsed.length) ? `｜参考知识：${aiScoring.kbUsed.map(k => escapeHtml(k.title)).join('、')}` : ''}
+          </div>
         </div>` : ''}
         ${aiScoring && (aiScoring.status==='pending' || aiScoring.status==='running') ? `
         <div style="padding:8px 12px;border-radius:8px;margin-bottom:12px;background:#fefce8;border:1px solid #fde68a;font-size:13px;color:#92400e">
@@ -2370,6 +2422,7 @@ async function openScoringDetail(recordId){
           🎯 本场通过线 <b>${passLine}</b> 分｜客观题已得 <b>${objectiveScore}</b> 分｜主观题满分 <b>${shortMax}</b> 分<br>
           本场主观题需 ≥ <b>${needShort}</b> 分才可通过；当前已录入主观题 <b>${savedShort}</b> 分，合计 <b>${objectiveScore + savedShort}</b> 分
         </div>
+        ${objectiveDetail}
         ${questions.map(q => {
           const userAns = answers[q.id] || '(未作答)';
           const prev = mentorDetails[q.id] || {};
@@ -2381,10 +2434,19 @@ async function openScoringDetail(recordId){
             ${perQuestionAi(q.id)}
             ${aiDetail ? `<div style="margin:0 0 8px;padding:8px 10px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe">
               <div style="font-size:12px;font-weight:700;color:#1d4ed8">🤖 AI 评分 ${aiDetail.score} / ${aiDetail.max} 分${typeof aiDetail.confidence === 'number' ? `（置信度 ${Math.round(aiDetail.confidence * 100)}%）` : ''}</div>
-              <div style="margin-top:6px;max-height:150px;overflow:auto">
-                ${(aiDetail.items || []).map(it => `<div style="font-size:12px;color:#1e3a8a;line-height:1.6">· <b>${it.score}/${it.max}</b> ${escapeHtml(it.point)} — ${escapeHtml(it.reason || '')}</div>`).join('')}
+              <div style="font-size:11px;font-weight:600;color:#1e40af;margin-top:6px">评分依据（按细则逐项）：</div>
+              <div style="margin-top:2px;max-height:210px;overflow:auto">
+                ${(aiDetail.items || []).map(it => {
+                  const full = it.score >= it.max;
+                  const zero = it.score <= 0;
+                  const color = full ? '#166534' : (zero ? '#b91c1c' : '#92400e');
+                  return `<div style="font-size:12px;color:${color};line-height:1.6;margin-top:2px">
+ · <b>${it.score}/${it.max}</b> ${escapeHtml(it.point)}<br>
+ <span style="color:#475569;padding-left:12px">→ ${escapeHtml(it.reason || (full ? '要点完整' : '未覆盖该评分项'))}</span>
+</div>`;
+                }).join('')}
               </div>
-              ${(aiDetail.missing || []).length ? `<div style="font-size:12px;color:#b91c1c;margin-top:6px">扣分点：${aiDetail.missing.map(x => escapeHtml(x)).join('；')}</div>` : ''}
+              ${(aiDetail.items || []).some(it => it.score < it.max) ? `<div style="font-size:12px;color:#b91c1c;margin-top:6px">扣分依据：${(aiDetail.items || []).filter(it => it.score < it.max).map(it => `${it.point.slice(0, 40)}（-${Math.round((it.max - it.score) * 10) / 10}分：${it.reason || '未覆盖'}）`).map(x => escapeHtml(x)).join('；')}</div>` : '<div style="font-size:12px;color:#166534;margin-top:6px">扣分依据：无，评分项均已覆盖。</div>'}
               ${(aiDetail.references || []).length ? `<div style="font-size:11px;color:#64748b;margin-top:6px">参考依据：${aiDetail.references.map(r => escapeHtml(r.title)).join('、')}</div>` : ''}
             </div>` : ''}
             ${q.answer && q.type==='short' ? `<div style="font-size:12px;color:var(--success);background:var(--success-light);padding:6px 8px;border-radius:6px;margin-bottom:8px"><strong>参考答案：</strong>${escapeHtml(q.answer)}</div>` : ''}
@@ -2447,7 +2509,7 @@ async function saveMentorScore(recordId){
     mentorScoreDetails[q.id] = { autoScore, mentorScore: newScore };
     shortScore += newScore;
     shortMax += (q.points||10);
-    newQuestionScores[q.id] = { score:newScore, maxScore:q.points||10 };
+    newQuestionScores[q.id] = { ...(newQuestionScores[q.id]||{}), score:newScore, maxScore:q.points||10 };
   });
 
   newTypeScores.short = { score:shortScore, max:shortMax };

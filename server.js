@@ -154,6 +154,77 @@ let _aiRunning = false;
 
 function roundHalf(n) { return Math.round(Number(n) * 2) / 2; }
 
+// 与提交时完全一致的答案归一化，用于历史数据修复
+function normalizeAnsValue(ans) {
+  if (ans === null || ans === undefined) return '';
+  if (Array.isArray(ans)) return ans.map(String).sort().join('');
+  if (typeof ans === 'boolean') return ans ? 'A' : 'B';
+  return String(ans);
+}
+
+// questionScores 的规范形态：{ [题目id]: { score, maxScore, ... } }
+function normalizeQuestionScoreMap(record) {
+  const raw = record && record.questionScores;
+  if (Array.isArray(raw)) {
+    const map = {};
+    for (const e of raw) if (e && e.id) map[e.id] = { ...e };
+    return map;
+  }
+  if (raw && typeof raw === 'object') return { ...raw };
+  return {};
+}
+
+// 历史坏数据修复：早期 AI 回写把 questionScores 误写成数组，客观题逐题得分被整体覆盖。
+// 用服务端保存的权威题目快照 + 学员答案按原判分口径重算，保证「查看评分」能看到每题得分。
+function repairQuestionScores(record) {
+  if (!record || !Array.isArray(record.questions) || !record.questions.length) return false;
+  const wasArray = Array.isArray(record.questionScores);
+  const map = normalizeQuestionScoreMap(record);
+  const answers = record.answers || {};
+  const aiPer = (record.aiScoring && record.aiScoring.perQuestion) || {};
+  let changed = wasArray;
+  for (const q of record.questions) {
+    if (!q || !q.id) continue;
+    const points = Number(q.points) || 5;
+    const existing = map[q.id];
+    if (isManualScoredQuestion(q)) {
+      if (!existing || existing.score === undefined) {
+        const ai = aiPer[q.id];
+        map[q.id] = ai
+          ? { score: ai.score, maxScore: points, manual: true, aiScored: true, aiComment: ai.comment, aiItems: ai.items, aiMissing: ai.missing, aiConfidence: ai.confidence }
+          : { score: 0, maxScore: points, manual: true };
+        changed = true;
+      }
+      continue;
+    }
+    if (existing && typeof existing.score === 'number' && existing.maxScore) continue;
+    const ua = answers[q.id];
+    let score = 0;
+    const t = q.type || 'single';
+    if (t === 'single' || t === 'judge' || t === 'multiple') score = normalizeAnsValue(ua) === normalizeAnsValue(q.answer) ? points : 0;
+    else if (t === 'fill') score = fillAnswerCorrect(ua, q.answer) ? points : 0;
+    else if (t === 'short') score = gradeShortAnswer(ua, q.keywords, points);
+    map[q.id] = { score, maxScore: points };
+    changed = true;
+  }
+  if (changed) {
+    record.questionScores = map;
+    markRecordsDirty();
+  }
+  return changed;
+}
+
+async function repairAllQuestionScores() {
+  try {
+    const records = await readRecordsCached();
+    let fixed = 0;
+    for (const r of records) { if (repairQuestionScores(r)) fixed++; }
+    if (fixed) console.log('[repair] questionScores 已修复', fixed, '条');
+  } catch (e) {
+    console.error('[repair] questionScores failed:', e.message);
+  }
+}
+
 function objectiveScoreOf(record) {
   const ts = record.typeScores || {};
   let sum = 0;
@@ -183,12 +254,13 @@ function applyAiResult(record, result) {
   };
   record.aiScore = result.total;
 
-  // 逐题写入 questionScores，便于导师评分弹窗直接展示与预填
-  const qs = Array.isArray(record.questionScores) ? record.questionScores : [];
+  // 逐题写入 questionScores，便于导师评分弹窗直接展示与预填。
+  // 注意：questionScores 是「以题目 id 为键的对象」，不是数组。
+  // 早期版本这里误用数组，会把客观题逐题得分整体覆盖掉，导致「查看评分」里选择题分数消失。
+  const map = normalizeQuestionScoreMap(record);
   for (const qid of Object.keys(result.perQuestion || {})) {
     const rq = result.perQuestion[qid];
-    const patch = {
-      id: qid,
+    map[qid] = Object.assign({}, map[qid] || {}, {
       score: rq.score,
       maxScore: rq.max,
       manual: true,
@@ -197,14 +269,12 @@ function applyAiResult(record, result) {
       aiItems: rq.items,
       aiMissing: rq.missing,
       aiConfidence: rq.confidence
-    };
-    const idx = qs.findIndex(x => x && x.id === qid);
-    if (idx >= 0) Object.assign(qs[idx], patch);
-    else qs.push(patch);
+    });
   }
-  record.questionScores = qs;
+  record.questionScores = map;
   record.typeScores = record.typeScores || {};
   record.typeScores.short = { score: result.total, max: result.max, total: result.max };
+
 
   // 人工已经评过的卷子：AI 结果只作为参考，不覆盖人工分数
   if (record.scoreSource === 'human') {
@@ -226,7 +296,7 @@ async function scoreRecordById(recordId) {
   if (!record) return;
   if (record.scoreSource === 'human') return; // 人工评分优先，不再自动评分
   const ai = record.aiScoring || {};
-  if (ai.status === 'done') return;
+  if (ai.status === 'done' && (ai.version || 0) >= aiGrader.GRADER_VERSION) return;
   if (!aiGrader.isEnabledForPanel(record.panel)) return;
 
   record.aiScoring = {
@@ -293,10 +363,11 @@ async function resumeAiScoring() {
       if (!r || r.panel !== 'audio') continue;
       if (r.scoreSource === 'human') continue; // 人工已评分的不动
       const ai = r.aiScoring;
-      if (ai && ai.status === 'done') continue;
+      // 已评分但引擎版本落后（细则解析/给分逻辑修复过）时自动重评一次
+      if (ai && ai.status === 'done' && (ai.version || 0) >= aiGrader.GRADER_VERSION) continue;
       if (ai && ai.status === 'failed' && (ai.attempts || 0) >= 3) continue;
       if (queued >= 200) break;
-      if (ai && ai.status === 'running') ai.status = 'pending';
+      if (ai && (ai.status === 'running' || ai.status === 'done')) ai.status = 'pending';
       enqueueAiScoring(r.id);
       queued++;
     }
@@ -1983,7 +2054,7 @@ app.post('/api/mentor/ai-backfill', mentorAuth, async (req, res) => {
   let queued = 0;
   for (const r of records) {
     if (!r || r.panel !== 'audio' || r.scoreSource === 'human') continue;
-    if (r.aiScoring && r.aiScoring.status === 'done') continue;
+    if (r.aiScoring && r.aiScoring.status === 'done' && (r.aiScoring.version || 0) >= aiGrader.GRADER_VERSION) continue;
     r.aiScoring = {
       ...(r.aiScoring || {}),
       status: 'pending',
@@ -2024,6 +2095,20 @@ app.delete('/api/mentor/records/:id/score', mentorAuth, async (req, res) => {
   target.finalScore = roundHalf(objectiveScoreOf(target) + (aiTotal || 0));
   target.scoreSource = aiTotal !== null ? 'ai' : 'auto';
   if (target.aiScoring) target.aiScoring.overridden = false;
+  // 撤销人工评分后，主观题逐题得分同步回 AI 分，避免「总分是 AI、明细还是旧人工分」的不一致
+  if (aiTotal !== null && target.aiScoring && target.aiScoring.perQuestion) {
+    const map = normalizeQuestionScoreMap(target);
+    for (const qid of Object.keys(target.aiScoring.perQuestion)) {
+      const rq = target.aiScoring.perQuestion[qid];
+      map[qid] = Object.assign({}, map[qid] || {}, {
+        score: rq.score, maxScore: rq.max, manual: true, aiScored: true,
+        aiComment: rq.comment, aiItems: rq.items, aiMissing: rq.missing, aiConfidence: rq.confidence
+      });
+    }
+    target.questionScores = map;
+    target.typeScores = target.typeScores || {};
+    target.typeScores.short = { score: aiTotal, max: target.aiScoring.max || aiTotal, total: target.aiScoring.max || aiTotal };
+  }
   // 闯关式固定卷（场景化/音频）按该卷通过线重判，其余沿用全局通过线
   if (isGatedPanel(target.panel)) {
     const examCfg = allExams.find(e => e.id === target.examId);
@@ -3096,6 +3181,8 @@ const PORT = process.env.PORT || 3000;
   await restoreQuestionsFromSupabase(); // 恢复本地文件
   // 启动时就把答题记录拉进内存：否则重启后第一个访问者要为整表读取等 1s 左右
   try { await readRecordsCached(); } catch (e) { console.error('[records] preload failed:', e.message); }
+  // 修复历史坏数据：早期版本把 questionScores 误写成数组，导致客观题逐题得分丢失
+  repairAllQuestionScores();
   // 恢复未完成的智能评分任务，并为音频场景专项历史卷补齐评分
   resumeAiScoring().catch(e => console.error('[aiGrader] resume error:', e.message));
   

@@ -14,6 +14,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// 评分引擎版本：细则解析/给分逻辑变更时递增，服务端会据此自动重评历史 AI 卷
+const GRADER_VERSION = 2;
+
 // ===== 配置 =====
 const CONFIG = {
   enabled: process.env.AI_GRADER_ENABLED !== 'false',
@@ -143,25 +146,43 @@ function referenceClauses(explain) {
     .filter(s => s.length >= 6);
 }
 
-// 从评分细则中切出评分项，并读取每项分值
+// 从评分细则中切出评分项，并读取每项分值。
+// 题库里细则有两种写法：
+//   1) 带圈号：①设备清单完整6分（…）；②功率匹配4分（…）
+//   2) 不带圈号：设备清单完整6分（…）；功率匹配计算4分（…）；线材辅材3分（…）
+// 必须同时兼容，否则整条细则会被当成一个评分项，导致评分依据不可读、给分失真。
 function parseRubricItems(question) {
   const max = Number(question.points) || 10;
   const rule = String(question.examineRule || '');
   const marker = /[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]/;
-  const first = rule.search(marker);
-  // 丢掉「评分细则（共15分）：」这类前言，避免把总分当成一个评分项
-  const body = first >= 0 ? rule.slice(first) : rule;
-  const parts = body.split(marker).map(s => s.trim()).filter(Boolean);
+
+  let segments;
+  if (marker.test(rule)) {
+    const first = rule.search(marker);
+    // 丢掉「评分细则（共15分）：」这类前言，避免把总分当成一个评分项
+    segments = rule.slice(first).split(marker).map(s => s.trim()).filter(Boolean);
+  } else {
+    // 无圈号：按分号切分（句号仅用于结尾，不参与切分，避免把「…，缺一类扣1分。」切碎）
+    segments = rule.split(/[；;]/).map(s => s.trim()).filter(Boolean);
+  }
+
   const items = [];
-  for (const p of parts) {
+  for (let p of segments) {
+    // 跳过「合计15分」「共15分」这类汇总句
+    if (/^(按要点分项评分|分项评分|评分细则)?[：:]?\s*(合计|共|总计)\s*\d/.test(p)) continue;
+    if (/^(合计|共|总计)\s*\d/.test(p)) continue;
     const m = p.match(/(\d+(?:\.\d+)?)\s*分/);
     if (!m) continue;
     const point = parseFloat(m[1]);
     if (!(point > 0) || point > max) continue;
-    items.push({ text: p.replace(/^[：:，,\s]+/, ''), max: point });
+    const text = p.replace(/^[：:，,\s]+/, '').trim();
+    if (text.length < 4) continue;
+    items.push({ text, max: point });
   }
   if (items.length === 0) return [{ text: rule || '按参考答案要点评分', max }];
+
   const sum = items.reduce((a, b) => a + b.max, 0);
+  // 只有总分明显对不上时才归一化，避免把正常的 6/4/3/2 细则改坏
   if (Math.abs(sum - max) > 0.01) {
     for (const it of items) it.max = Math.round((it.max * max / sum) * 2) / 2;
     const diff = Math.round((max - items.reduce((a, b) => a + b.max, 0)) * 2) / 2;
@@ -218,10 +239,27 @@ function gradeQuestionLocal(question, answer) {
   const totalWeight = clauseInfo.reduce((a, b) => a + b.weight, 0);
   const overall = totalWeight ? clauseInfo.reduce((a, b) => a + b.cov * b.weight, 0) / totalWeight : 0;
 
+  // 参考答案中实际出现的术语与数值，才是「必须覆盖」的内容。
+  // 细则里常有「设备清单」「场景」「系数」这类描述性词语，学员不一定原样写出，
+  // 不能因为没写这几个字就扣分。
+  const refConcepts = new Set();
+  const refNums = new Set();
+  const refBigrams = new Set();
+  for (const c of clauses) {
+    for (const x of conceptsIn(c)) refConcepts.add(x);
+    for (const x of numTokens(c)) refNums.add(x);
+    for (const x of bigrams(c)) refBigrams.add(x);
+  }
+  // 学员答案已基本复述参考答案时，视为要点完整（避免同义改写被误扣分）
+  const refContain = containment(refBigrams, ansBigrams);
+
   const items = parseRubricItems(question).map(it => {
     const itB = bigrams(it.text);
     const itConcepts = conceptsIn(it.text);
-    const matched = [...itConcepts].filter(c => ansConcepts.has(c));
+    // 只把「细则里有、参考答案里也有」的术语当作必答要点
+    let required = [...itConcepts].filter(c => refConcepts.has(c));
+    if (required.length === 0) required = [...itConcepts];
+    const matched = required.filter(c => ansConcepts.has(c));
 
     // 找出与当前评分项最相关的参考答案要点，按相关度加权
     const rels = clauseInfo
@@ -236,29 +274,39 @@ function gradeQuestionLocal(question, answer) {
     }
 
     // 评分项自身术语的覆盖度（术语少时以参考答案覆盖度为主）
-    const conceptCov = itConcepts.size >= 2 ? matched.length / itConcepts.size : null;
+    const conceptCov = required.length >= 2 ? matched.length / required.length : null;
     let cov = conceptCov === null ? (0.35 * overall + 0.65 * itemCov) : (0.55 * conceptCov + 0.45 * itemCov);
 
-    const wantNums = numTokens(it.text);
-    const itNumCov = numericCoverage(wantNums, ansNums);
+    // 只核算参考答案里确实要求的数值，避免把细则里的举例数值当成硬性要求
+    const wantNums = [...numTokens(it.text)].filter(n => refNums.has(n));
+    const itNumCov = wantNums.length ? numericCoverage(new Set(wantNums), ansNums) : null;
     if (itNumCov !== null) cov *= 0.5 + 0.5 * itNumCov;
+
+    if (refContain > 0.6) cov = Math.max(cov, Math.min(1, refContain * 0.95));
 
     cov = Math.max(0, Math.min(1, cov));
     let score = roundHalf(it.max * cov);
     if (cov < 0.12) score = 0;
     score = Math.max(0, Math.min(it.max, score));
 
-    const missingConcepts = [...itConcepts].filter(c => !ansConcepts.has(c));
+    const missingConcepts = required.filter(c => !ansConcepts.has(c));
+
+    let reason;
+    if (score >= it.max) {
+      reason = `本项要求已覆盖${matched.length ? `（${matched.slice(0, 6).join('、')}）` : ''}`;
+    } else if (score <= 0) {
+      reason = `未提及本项要求${required.length ? `（需说明：${required.slice(0, 5).join('、')}）` : ''}`;
+    } else if (missingConcepts.length) {
+      reason = `部分覆盖，缺少：${missingConcepts.slice(0, 6).join('、')}`;
+    } else {
+      reason = '部分覆盖，关键计算或细节说明不完整';
+    }
 
     return {
       point: it.text.slice(0, 160),
       max: it.max,
       score,
-      reason: score >= it.max
-        ? `要点覆盖完整（${matched.slice(0, 8).join('、') || '表述与要点一致'}）`
-        : (matched.length
-          ? `已覆盖：${matched.slice(0, 8).join('、')}${missingConcepts.length ? `；缺少：${missingConcepts.slice(0, 8).join('、')}` : ''}`
-          : '未覆盖该评分项的关键要点')
+      reason
     };
   });
 
@@ -478,12 +526,13 @@ async function gradeRecord(record) {
     total: roundHalf(shortTotal),
     max: roundHalf(shortMax),
     kbUsed: kbUsed.slice(0, 6),
-    version: 1
+    version: GRADER_VERSION
   };
 }
 
 module.exports = {
   CONFIG,
+  GRADER_VERSION,
   isEnabledForPanel,
   activeProvider,
   gradeRecord,
